@@ -1,6 +1,6 @@
 {
   "name": "obsidian-story-web",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Capture plot points and campaign notes as plain markdown, then connect and group them on an interactive graph.",
   "main": "main.js",
   "type": "module",
