@@ -1,0 +1,9 @@
+{
+  "id": "story-web",
+  "name": "Story Web",
+  "version": "0.1.0",
+  "minAppVersion": "1.7.2",
+  "description": "Capture plot points and campaign notes as plain markdown, then connect and group them on an interactive graph.",
+  "author": "TheWinterShadow",
+  "isDesktopOnly": false
+}

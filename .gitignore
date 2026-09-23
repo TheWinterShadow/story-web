@@ -1,0 +1,8 @@
+node_modules/
+main.js
+*.js.map
+.DS_Store
+
+# Test vault: keep the sample notes, not Obsidian's per-machine state or build output
+test-vault/.obsidian/*
+!test-vault/.obsidian/community-plugins.json

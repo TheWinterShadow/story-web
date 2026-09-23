@@ -1,0 +1,290 @@
+/* Story Web graph view */
+
+.story-web-view {
+	position: relative;
+	padding: 0 !important;
+	overflow: hidden;
+	background-color: var(--background-primary);
+}
+
+.story-web-graph {
+	position: absolute;
+	inset: 0;
+	/* Dot grid; size and offset are synced to the graph's pan/zoom from JS. */
+	background-image: radial-gradient(circle, var(--background-modifier-border) 1px, transparent 1.2px);
+	background-size: var(--story-web-grid-size, 24px) var(--story-web-grid-size, 24px);
+	background-position: var(--story-web-grid-x, 0) var(--story-web-grid-y, 0);
+	/* Let Cytoscape own every touch gesture (pan, pinch, drag) instead of the browser. */
+	touch-action: none;
+}
+
+/* ---- floating controls ---- */
+
+.story-web-view {
+	container-type: inline-size;
+	--story-web-control-size: 30px;
+}
+
+.is-mobile .story-web-view {
+	/* Comfortable touch targets on iPad/phone. */
+	--story-web-control-size: 40px;
+}
+
+.story-web-toolbar {
+	position: absolute;
+	top: var(--size-4-3);
+	left: var(--size-4-3);
+	right: var(--size-4-3);
+	z-index: 2;
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: var(--size-4-2);
+	pointer-events: none;
+}
+
+.story-web-toolbar-left,
+.story-web-actions {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: var(--size-4-2);
+}
+
+.story-web-toolbar-left > *,
+.story-web-actions,
+.story-web-zoom {
+	pointer-events: auto;
+}
+
+.story-web-actions {
+	flex-wrap: nowrap;
+	flex-shrink: 0;
+}
+
+.story-web-toolbar .story-web-filter {
+	height: var(--story-web-control-size);
+	padding: 0 var(--size-4-6) 0 var(--size-4-3);
+	border-radius: var(--radius-m);
+	border: 1px solid var(--background-modifier-border);
+	background-color: var(--background-primary);
+	box-shadow: var(--shadow-s);
+	font-size: var(--font-ui-small);
+	color: var(--text-muted);
+}
+
+.story-web-toolbar .story-web-filter:hover {
+	color: var(--text-normal);
+	border-color: var(--background-modifier-border-hover);
+}
+
+/* Buttons: Obsidian's own button / mod-cta / clickable-icon styles, sized to match. */
+.story-web-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: var(--size-2-2);
+	height: var(--story-web-control-size);
+	min-width: var(--story-web-control-size);
+	padding: 0 var(--size-4-3);
+	border-radius: var(--radius-m);
+	font-size: var(--font-ui-small);
+	font-weight: var(--font-medium);
+	white-space: nowrap;
+	cursor: pointer;
+}
+
+.story-web-actions .story-web-btn {
+	box-shadow: var(--shadow-s);
+}
+
+.story-web-btn-icon {
+	display: flex;
+}
+
+.story-web-btn-icon svg {
+	width: var(--icon-s, 16px);
+	height: var(--icon-s, 16px);
+}
+
+.story-web-connect {
+	background-color: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	color: var(--text-normal);
+}
+
+.story-web-connect:hover {
+	background-color: var(--background-modifier-hover);
+}
+
+/* Connect mode on: accent-tinted so it reads as a toggled state, not another button. */
+.story-web-connect.is-active {
+	background-color: hsla(var(--interactive-accent-hsl), 0.15);
+	border-color: var(--interactive-accent);
+	color: var(--text-accent);
+}
+
+.story-web-connect.is-active:hover {
+	background-color: hsla(var(--interactive-accent-hsl), 0.22);
+}
+
+/* Zoom dock */
+.story-web-zoom {
+	position: absolute;
+	right: var(--size-4-3);
+	bottom: var(--size-4-3);
+	z-index: 2;
+	display: flex;
+	flex-direction: column;
+	padding: var(--size-2-1, 2px);
+	border-radius: var(--radius-m);
+	border: 1px solid var(--background-modifier-border);
+	background-color: var(--background-primary);
+	box-shadow: var(--shadow-s);
+}
+
+.story-web-zoom .story-web-btn {
+	padding: 0;
+	width: var(--story-web-control-size);
+	border-radius: var(--radius-s);
+}
+
+.story-web-zoom-divider {
+	height: 1px;
+	margin: var(--size-2-1, 2px) var(--size-2-2);
+	background-color: var(--background-modifier-border);
+}
+
+.story-web-view.is-empty .story-web-zoom {
+	display: none;
+}
+
+/* Narrow panes: icon-only buttons, hint drops below. */
+@container (max-width: 420px) {
+	.story-web-actions .story-web-btn-label {
+		display: none;
+	}
+
+	.story-web-actions .story-web-btn {
+		padding: 0;
+		width: var(--story-web-control-size);
+	}
+}
+
+/* Connect-mode hint: a calm status chip, not a banner. */
+.story-web-hint {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--size-2-3);
+	padding: var(--size-2-2) var(--size-4-3);
+	border-radius: var(--radius-l);
+	border: 1px solid var(--background-modifier-border);
+	background-color: var(--background-primary);
+	box-shadow: var(--shadow-s);
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+}
+
+.story-web-hint::before {
+	content: '';
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background-color: var(--interactive-accent);
+	animation: story-web-pulse 1.6s ease-in-out infinite;
+}
+
+.story-web-hint:empty {
+	display: none;
+}
+
+@keyframes story-web-pulse {
+	50% {
+		opacity: 0.35;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.story-web-hint::before {
+		animation: none;
+	}
+}
+
+.story-web-graph.is-over-note {
+	cursor: pointer;
+}
+
+.story-web-graph.is-over-note:active {
+	cursor: grabbing;
+}
+
+.story-web-view.is-connecting .story-web-graph {
+	cursor: crosshair;
+}
+
+/* ---- empty state ---- */
+
+.story-web-empty {
+	position: absolute;
+	inset: 0;
+	z-index: 1;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: var(--size-2-3);
+	padding: var(--size-4-8);
+	text-align: center;
+	pointer-events: none;
+}
+
+.story-web-empty-icon {
+	display: flex;
+	margin-bottom: var(--size-4-2);
+	color: var(--text-faint);
+}
+
+.story-web-empty-icon svg {
+	width: 40px;
+	height: 40px;
+	stroke-width: 1.5;
+}
+
+.story-web-empty-title {
+	font-size: var(--font-ui-medium);
+	font-weight: var(--font-semibold);
+	color: var(--text-normal);
+}
+
+.story-web-empty-desc {
+	max-width: 280px;
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+}
+
+.story-web-empty button {
+	margin-top: var(--size-4-3);
+	pointer-events: auto;
+}
+
+/* Hidden element used to resolve theme variables to concrete colours (theme.ts). */
+.story-web-probe {
+	position: absolute;
+	visibility: hidden;
+	pointer-events: none;
+	color: var(--story-web-probe-color);
+}
+
+/* ---- modals ---- */
+
+.story-web-suggestions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--size-4-2);
+	padding-bottom: var(--size-4-3);
+}
+
+.story-web-suggestions button {
+	border-radius: var(--radius-l);
+	font-size: var(--font-ui-small);
+}
