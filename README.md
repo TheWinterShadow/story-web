@@ -60,6 +60,7 @@ The first time you open the graph, notes without a position are laid out automat
 ```bash
 npm install
 npm run dev      # watch build; also copies into test-vault/.obsidian/plugins/story-web
+npm run lint     # the same eslint-plugin-obsidianmd rules the community directory's review runs
 npm test         # unit tests (pure model + frontmatter logic)
 npm run build    # typecheck + production bundle → main.js
 ```

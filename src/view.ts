@@ -258,7 +258,7 @@ export class StoryWebView extends ItemView {
 				const currentParent = node.isChild() ? node.parent().first().id() : null;
 				if (currentParent !== parent) {
 					node.move({ parent });
-					node = cy.getElementById(n.id) as NodeSingular;
+					node = cy.getElementById(n.id);
 				}
 				if (n.position && !node.grabbed() && distance(node.position(), n.position) > 0.5) {
 					node.position({ ...n.position });
@@ -574,7 +574,7 @@ export class StoryWebView extends ItemView {
 		if (edges.some((e) => !e.data('manual'))) {
 			new Notice('That link is written in the note body. Edit the note to remove it.');
 		}
-		for (const edge of edges.toArray() as EdgeSingular[]) {
+		for (const edge of edges.toArray()) {
 			if (edge.data('manual')) await this.removeEdge(edge);
 		}
 	}

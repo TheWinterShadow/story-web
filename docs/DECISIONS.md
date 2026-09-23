@@ -75,3 +75,13 @@ Short architecture decision records. Newest last. Each entry: what, why, and wha
 **Decision:** The primary actions (**+ New** and a **Connect** toggle) float at the top right of the graph with text labels. Zoom in, zoom out and fit sit in a map-style dock at the bottom right. Nothing is added to the view header. All controls use Obsidian's own button classes (`mod-cta`, `clickable-icon`) and theme variables, grow to 40px touch targets on mobile, and drop their labels when the pane is under 420px wide (via a container query).
 
 **Why:** Icon-only header actions were ambiguous. "Fit" used the `maximize` icon, which reads as "fullscreen", and connect mode had no visible on/off state. On iPad, Obsidian can fold view-header actions into a "⋯" menu, hiding them. Now the Connect toggle switches to an accent-tinted **Done** while active (with `aria-pressed` set), so the mode is always visible and it's obvious how to leave it.
+
+## 12. Lint with Obsidian's own review rules; TypeScript pinned to 6.0
+
+**Decision:** `npm run lint` runs `eslint-plugin-obsidianmd`'s recommended config (ESLint core + typescript-eslint type-checked + Obsidian-specific rules), which is the rule set the community directory's automated review reports. CI and the release workflow both fail on lint errors. TypeScript is pinned to `~6.0`.
+
+**Why:** Otherwise the only way to learn about review findings is to publish a release and wait for the directory to review it. Running the same rules locally catches them first. typescript-eslint's type-aware rules need TypeScript's JavaScript API, which the Go-based TypeScript 7 doesn't provide (typescript-eslint 8 supports `<6.1`). TS 7 offered nothing this project needs.
+
+**Revisit:** Move to TypeScript 7 once typescript-eslint supports it.
+
+**Settings:** the settings tab implements the 1.13 declarative API (`getSettingDefinitions`), so settings appear in Obsidian's settings search and the folder setting uses the native folder picker. `display()` stays as the fallback for Obsidian 1.7.2–1.12.

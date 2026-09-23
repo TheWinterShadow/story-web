@@ -59,7 +59,7 @@ const PALETTE_VARS: [string, string][] = [
  */
 export function readTheme(el: HTMLElement): Theme {
 	const probe = el.createDiv({ cls: 'story-web-probe' });
-	const ctx = document.createElement('canvas').getContext('2d');
+	const ctx = createEl('canvas').getContext('2d');
 	const resolve = (cssVar: string, fallback: string): string => {
 		probe.setCssProps({ '--story-web-probe-color': `var(${cssVar}, ${fallback})` });
 		const computed = getComputedStyle(probe).color;
@@ -116,7 +116,7 @@ export function assignTypeSlots(types: string[], paletteSize: number): Map<strin
 
 /** Returns a cached text-width function for a CSS font shorthand. */
 export function textMeasurer(font: string): (text: string) => number {
-	const ctx = document.createElement('canvas').getContext('2d');
+	const ctx = createEl('canvas').getContext('2d');
 	const cache = new Map<string, number>();
 	return (text) => {
 		let w = cache.get(text);

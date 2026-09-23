@@ -33,8 +33,9 @@ export default class StoryWebPlugin extends Plugin {
 		this.addSettingTab(new StoryWebSettingTab(this.app, this));
 	}
 
-	async onunload(): Promise<void> {
-		await this.store.flushPositions();
+	onunload(): void {
+		// Best effort: Obsidian doesn't await unload, but the writes are already queued.
+		void this.store.flushPositions();
 	}
 
 	openCapture(): void {
