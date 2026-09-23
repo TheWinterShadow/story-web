@@ -10,6 +10,9 @@ on:
 
 permissions:
   contents: write
+  # For signed build-provenance attestations of the release assets.
+  id-token: write
+  attestations: write
 
 jobs:
   release:
@@ -35,6 +38,14 @@ jobs:
         run: |
           bad=$(grep -oE 'require\("[^"]+"\)' main.js | sort -u | grep -v 'require("obsidian")' || true)
           if [ -n "$bad" ]; then echo "Non-mobile-safe requires in bundle:"; echo "$bad"; exit 1; fi
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            main.js
+            manifest.json
+            styles.css
 
       - name: Publish release
         env:

@@ -75,7 +75,11 @@ npm version patch   # or minor / major: bumps package.json, manifest.json, versi
 git push --follow-tags
 ```
 
-The `Release` workflow builds from the tag and publishes a GitHub release with `main.js`, `manifest.json` and `styles.css` attached, which is what Obsidian installs from. It refuses to publish if the tag doesn't match `manifest.json`.
+The `Release` workflow builds from the tag and publishes a GitHub release with `main.js`, `manifest.json` and `styles.css` attached, which is what Obsidian installs from. It refuses to publish if the tag doesn't match `manifest.json`. Each release also gets a signed build-provenance attestation, so anyone can check the files were built from this repo by CI:
+
+```bash
+gh attestation verify main.js --repo TheWinterShadow/story-web
+```
 
 ### Testing on iPad
 

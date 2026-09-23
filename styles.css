@@ -1,8 +1,9 @@
 /* Story Web graph view */
 
 .story-web-view {
+	/* No padding override needed: every child is absolutely positioned (inset: 0),
+	   and absolute positioning ignores the containing block's padding. */
 	position: relative;
-	padding: 0 !important;
 	overflow: hidden;
 	background-color: var(--background-primary);
 }
