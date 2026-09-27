@@ -33,7 +33,7 @@ export function folderPath(settings: StoryWebSettings): string {
 const TEXT = {
 	folder: {
 		name: 'Folder',
-		desc: 'Notes in this folder (and its subfolders) appear on the graph. Positions, groups and manual connections are written to their frontmatter. Cannot be the vault root.',
+		desc: 'Notes in this folder (and its subfolders) appear on the graph. Subfolders become groups automatically, nested as deep as you like — moving, renaming or ungrouping a note moves the actual file. Position and manual connections are written to frontmatter. Cannot be the vault root.',
 	},
 	defaultType: {
 		name: 'Default type',

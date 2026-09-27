@@ -1,14 +1,15 @@
 /**
  * Pure graph model: turns per-note facts into nodes, edges and groups.
  *
- * The Obsidian-facing layer (see `source.ts`) resolves links and reads
- * frontmatter; everything here is plain data so it can be unit tested.
+ * The Obsidian-facing layer (see `store.ts`) resolves links, reads
+ * frontmatter and computes each note's folder; everything here is plain
+ * data so it can be unit tested.
  */
+import { compareGroupPaths, groupAncestry, groupDepth, groupLabel, groupParentPath, type GroupPath } from './folders';
 
 export const FM = {
 	blurb: 'blurb',
 	type: 'type',
-	group: 'group',
 	connects: 'connects_to',
 	x: 'x',
 	y: 'y',
@@ -28,6 +29,8 @@ export interface NoteInfo {
 	bodyLinks: string[];
 	/** Resolved paths from the `connects_to` frontmatter list. */
 	manualLinks: string[];
+	/** The note's group: its containing folder's path relative to the configured root. '' = directly in the root (ungrouped). */
+	group: GroupPath;
 }
 
 export interface GraphNode {
@@ -35,7 +38,8 @@ export interface GraphNode {
 	path: string;
 	label: string;
 	type: string | null;
-	group: string | null;
+	/** '' means ungrouped — never appears as a Cytoscape parent. */
+	group: GroupPath;
 	position: Position | null;
 }
 
@@ -49,10 +53,24 @@ export interface GraphEdge {
 	linked: boolean;
 }
 
+/** One folder-derived group, i.e. one compound box on the graph. Nested arbitrarily deep via `parentId`. */
+export interface GroupNode {
+	id: string;
+	/** Its own path relative to the root, e.g. "Act 1/Heist". */
+	path: GroupPath;
+	/** Just its own segment ("Heist"), shown as the box label. */
+	label: string;
+	/** The enclosing group's id, or null for a top-level group. */
+	parentId: string | null;
+	/** 0 = top-level. */
+	depth: number;
+}
+
 export interface GraphModel {
 	nodes: GraphNode[];
 	edges: GraphEdge[];
-	groups: string[];
+	/** Every group with at least one visible note somewhere in its subtree. Ordered parent-before-child, safe to insert in this order. */
+	groups: GroupNode[];
 	/** Every distinct `type` value in the full note set (ignores the filter) — drives the filter dropdown. */
 	types: string[];
 	/** True if any note has no `type` (lets the UI offer an "Untyped" filter). */
@@ -63,7 +81,7 @@ export interface GraphModel {
 export type TypeFilter = string | null;
 
 export const nodeId = (path: string): string => `n:${path}`;
-export const groupId = (name: string): string => `g:${name}`;
+export const groupId = (group: GroupPath): string => `g:${group}`;
 export const edgeId = (source: string, target: string): string => `e:${source}->${target}`;
 
 export function readString(fm: Record<string, unknown> | undefined, key: string): string | null {
@@ -93,6 +111,7 @@ export function buildGraph(notes: NoteInfo[], filter: TypeFilter = null): GraphM
 	const types = new Set<string>();
 	let hasUntyped = false;
 	const nodes: GraphNode[] = [];
+	const neededGroups = new Set<GroupPath>();
 
 	for (const note of notes) {
 		const fm = note.frontmatter;
@@ -107,9 +126,12 @@ export function buildGraph(notes: NoteInfo[], filter: TypeFilter = null): GraphM
 			path: note.path,
 			label: readString(fm, FM.blurb) ?? note.basename,
 			type,
-			group: readString(fm, FM.group),
+			group: note.group,
 			position: readPosition(fm),
 		});
+		// Every ancestor of a visible note's group is itself needed, as a
+		// container, even if no note sits directly inside it.
+		for (const ancestor of groupAncestry(note.group)) neededGroups.add(ancestor);
 	}
 
 	const visible = new Set(nodes.map((n) => n.path));
@@ -128,7 +150,14 @@ export function buildGraph(notes: NoteInfo[], filter: TypeFilter = null): GraphM
 		for (const target of note.bodyLinks) addEdge(note.path, target, 'linked');
 	}
 
-	const groups = [...new Set(nodes.map((n) => n.group).filter((g): g is string => g !== null))].sort();
+	// Sorted (depth, path) so every parent is listed before its children —
+	// callers can insert groups in this order without a second pass.
+	const groups: GroupNode[] = [...neededGroups]
+		.sort((a, b) => groupDepth(a) - groupDepth(b) || compareGroupPaths(a, b))
+		.map((path) => {
+			const parent = groupParentPath(path);
+			return { id: groupId(path), path, label: groupLabel(path), parentId: parent === '' ? null : groupId(parent), depth: groupDepth(path) };
+		});
 
 	return {
 		nodes,

@@ -2,22 +2,21 @@
 
 An Obsidian plugin for quickly capturing plot points and campaign notes. Each one is a plain markdown note. Afterwards you can arrange, connect, and group them on an interactive graph.
 
-- **Quick capture:** type a title and a one-line blurb, and you're done.
+- **Quick capture:** type a title and a one-line blurb, and you're done. Picking a group is optional and doesn't slow that down.
 - **Card graph:** each note is a card showing its blurb, wrapped to a few lines (configurable). A coloured stripe marks its `type`. Click or tap a card to open the real note. Hovering a card highlights what it's connected to.
 - **Manual connections:** in connect mode, tap a source note and then a target note. `[[wikilinks]]` in note bodies are shown automatically as dashed edges.
-- **Groups:** right-click (or long-press on touch) a note → *Add to group…*. Notes that share a group are drawn inside a box.
+- **Groups are folders:** a note's group is just the subfolder it's in. Subfolders can nest as deep as you like — Plots/Act 1/Heist/ shows up as a box inside a box. Moving, renaming or ungrouping a note through the graph moves or renames the real file/folder.
 - **Desktop and mobile:** built for iPad as well as desktop, including pinch-zoom, pan, drag, tap, and long-press.
-- **No lock-in:** everything is stored in YAML frontmatter. If you disable the plugin, your notes are still ordinary markdown.
+- **No lock-in:** everything else is stored in YAML frontmatter. If you disable the plugin, your notes are still ordinary markdown in ordinary folders.
 
 ## Note format
 
-Notes live in one configurable folder (default `Plots/`, including subfolders):
+Notes live in one configurable folder (default `Plots/`), in any arrangement of subfolders you like — a subfolder *is* a group, so `Plots/Act 1/Heist/The blueprints.md` shows up as a card in a "Heist" box nested inside an "Act 1" box. A note directly in `Plots/` is ungrouped.
 
 ```yaml
 ---
 blurb: "The vault is already empty when the crew breaks in"   # node label; falls back to the filename
 type: fiction                                                 # optional; the graph can filter by it
-group: Act 1                                                  # optional; notes sharing a group are boxed together
 connects_to: ["[[Someone got there first]]"]                  # optional; manual edges, as wikilinks
 x: 120                                                        # written by the plugin when you move a node
 y: 340
@@ -27,6 +26,8 @@ The note body is yours. The plugin never modifies it.
 ```
 
 Every field is optional. A note with no frontmatter still shows up, labelled with its filename. `type` can be any value you like, for example `fiction`, `campaign`, or `worldbuilding`.
+
+> Upgrading from a version before groups were folders? The old `group:` frontmatter field is no longer read. Move those notes into a matching subfolder (drag them in Obsidian's file explorer, or use "Move to group…" on the graph) and delete the now-unused `group:` line whenever you're touching that note next — it's otherwise harmless to leave behind.
 
 ## Using it
 
@@ -40,8 +41,10 @@ Every field is optional. A note with no frontmatter still shows up, labelled wit
 | Fit everything in view | The frame button under the zoom buttons | same |
 | Connect | **Connect** (top right), then click the note to start from, then the note it leads to | same, with taps. Or long-press a note → *Connect from here…* |
 | Delete a manual connection | Select the edge, then press Delete, or right-click it | Long-press the edge |
-| Group | Right-click a note → *Add to group…* | Long-press a note |
-| Rename / dissolve a group | Right-click the group box | Long-press the group box |
+| Add/move to a group | Right-click a note → *Add to group…* / *Move to group…* — moves the file | Long-press a note |
+| Remove from its group | Right-click a note → *Remove from "…"* — moves the file back to the root | Long-press a note |
+| Rename a group | Right-click the group box → *Rename group…* — renames the folder | Long-press the group box |
+| Ungroup | Right-click the group box → *Ungroup* — moves its contents up one level, deletes the folder | Long-press the group box |
 | Leave connect mode | **Done** (the Connect button while active), or Esc | **Done** |
 
 Clicking a note reuses an open note pane when there is one, so the graph stays put. A good setup is to keep the graph in one split and your notes in the other.
@@ -50,7 +53,7 @@ The first time you open the graph, notes without a position are laid out automat
 
 ## Settings
 
-- **Folder:** where the notes live. It can't be the vault root, because the plugin writes positions into every note it lays out.
+- **Folder:** where the notes live. It can't be the vault root, because the plugin writes positions into every note it lays out and every subfolder inside it becomes a renameable, ungroupable group.
 - **Default type:** the `type` added to notes created with quick capture.
 - **Lines per card:** how many lines of blurb each card shows (1–6, default 3). Longer blurbs end in "…". Set it to 1 for compact one-line cards.
 - **Open note after capture:** off by default, so capture doesn't interrupt what you're doing.
@@ -92,9 +95,10 @@ Copy `main.js`, `manifest.json`, and `styles.css` into `<vault>/.obsidian/plugin
 src/
   main.ts         plugin entry: commands, ribbon, settings, view registration
   view.ts         ItemView + Cytoscape: rendering, diffing, gestures, menus
-  store.ts        the only module that touches the vault (reads cache, writes frontmatter)
-  model.ts        pure: notes → nodes/edges/groups (+ type filter)
+  store.ts        the only module that touches the vault (reads cache, writes frontmatter, moves/renames files for groups)
+  model.ts        pure: notes → nodes/edges/group tree (+ type filter)
   frontmatter.ts  pure: frontmatter mutations used inside processFrontMatter
+  folders.ts      pure: group-path arithmetic (a group is a folder — see model.ts + store.ts)
   links.ts        pure: parsing `connects_to` wikilinks
   theme.ts        visual design: theme colours → Cytoscape stylesheet, type colours
   wrap.ts         pure: word-wrapping blurbs into card lines

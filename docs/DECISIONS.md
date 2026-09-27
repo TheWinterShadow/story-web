@@ -12,7 +12,9 @@ Short architecture decision records. Newest last. Each entry: what, why, and wha
 
 ## 2. All state lives in note frontmatter
 
-**Decision:** Position (`x`, `y`), grouping (`group`), manual edges (`connects_to` as wikilinks), and `type` are stored in each note's YAML frontmatter. Writes go only through `processFrontMatter`. Note bodies are never modified.
+**Decision:** Position (`x`, `y`), manual edges (`connects_to` as wikilinks), and `type` are stored in each note's YAML frontmatter. Writes go only through `processFrontMatter`. Note bodies are never modified.
+
+**Superseded in part by decision 13:** grouping used to be a `group:` frontmatter field too. It is now the note's real folder instead — see decision 13 for why.
 
 **Why:** There's no lock-in and no sidecar file that drifts out of sync. It works with any sync method, and diffs are readable in git. Uninstalling the plugin leaves valid markdown behind. Keeping `connects_to` as wikilinks means Obsidian's own link-rename handling keeps them valid.
 
@@ -23,6 +25,8 @@ Short architecture decision records. Newest last. Each entry: what, why, and wha
 **Decision:** The folder setting falls back to `Plots` if it is blank or `/`.
 
 **Why:** The first time the view opens, the plugin lays out every unpositioned note and writes `x`/`y` into its frontmatter. Doing that to a whole vault by accident would add frontmatter to hundreds of unrelated notes.
+
+**Raised stakes since decision 13:** every subfolder under this setting is now a live, renameable, ungroupable, deletable group (see decision 13). Pointing it at the vault root wouldn't just add stray frontmatter anymore — the "Ungroup" action could rename or dissolve folders that have nothing to do with this plugin. The same guard covers both risks; nothing extra was needed.
 
 ## 4. Edges: manual vs. body links
 
@@ -85,3 +89,26 @@ Short architecture decision records. Newest last. Each entry: what, why, and wha
 **Revisit:** Move to TypeScript 7 once typescript-eslint supports it.
 
 **Settings:** the settings tab implements the 1.13 declarative API (`getSettingDefinitions`), so settings appear in Obsidian's settings search and the folder setting uses the native folder picker. `display()` stays as the fallback for Obsidian 1.7.2–1.12.
+
+## 13. Groups are folders, not frontmatter
+
+**Decision (2026-09-27, at Eli's direction):** A note's group is entirely determined by which folder it's in, relative to the configured root. There is no `group:` frontmatter field any more. Subfolders can nest to any depth — `Plots/Act 1/Heist/` renders as a "Heist" box nested inside an "Act 1" box, via Cytoscape's native nested compound nodes. Every group action is a real file operation, done through `NoteStore`, never a frontmatter write:
+
+- **Add/move to group:** `vault.rename()`s the note into the target folder (creating it if needed).
+- **Remove from group:** the same, target = the root folder.
+- **Rename group:** `vault.rename()`s the folder's own leaf segment. Obsidian moves its contents and updates links automatically.
+- **Ungroup:** every direct child of the folder — notes *and* subfolders, which keep their own nested structure — moves up into the folder's parent, then the emptied folder is trashed via `fileManager.trashFile()` (recoverable, matching how deleting a folder normally works in Obsidian). This is "un-indent by one level, in place," not "flatten everything below it" — a nested subgroup survives ungrouping its parent.
+
+Picking a group is optional at capture time (Eli's call, weighed against a "required" alternative): the fast path — title, Enter, blurb, Enter — is completely unchanged. The group field is a third, genuinely optional field below it; leaving it blank creates the note directly in the root folder.
+
+**Why:** The user asked for auto-grouping by folder and for capture to place a note straight into a chosen group's folder. Keeping the old frontmatter `group` field alongside that would mean two disagreeing sources of truth for the same concept. Folder-as-group also means grouping structure is visible and editable outside the plugin too (Obsidian's file explorer, or any other tool), and "Rename group" / "Ungroup" become one `vault.rename()`/`trashFile()` call instead of rewriting frontmatter across a whole folder's worth of notes.
+
+**Not done:** existing notes with a `group:` frontmatter key are not migrated automatically — that key is simply no longer read. See the README's upgrade note. Automatic migration (matching each old group name to a new folder, handling collisions) was judged more complex and riskier than it's worth for what is, as of this decision, an unreleased/just-published plugin with no meaningful existing user base yet.
+
+**Tradeoff:** group actions now touch the filesystem, not just frontmatter — a rename can collide with an existing file/folder name (handled: numbered-suffix retry, same pattern as `capture()`'s own filename collision handling) or fail outright (handled: every group action in `view.ts` is wrapped in try/catch with a `Notice` on failure, unlike frontmatter writes which rarely fail). "Ungroup" is more consequential than the old version (which only cleared a frontmatter field) since it moves files and deletes a folder — mitigated by using the trash rather than a permanent delete, consistent with how the rest of Obsidian handles folder deletion, and deliberately *not* wrapped in an extra confirmation dialog, since no other action in this plugin uses one and Obsidian's own trash already provides the safety net.
+
+## 14. Layout ordering is ordinal, never locale-aware
+
+**Decision:** Sorting group paths and item ids for the initial layout (`compareGroupPaths` in `folders.ts`, used by `columnLayout`) uses plain UTF-16 code-unit comparison (`<`/`>`), never `String.prototype.localeCompare`.
+
+**Why:** Decision 8 already required the first-open layout to be identical on every device, so two devices opening the graph for the first time don't compute different positions and write conflicting `x`/`y` values. The original flat-group implementation actually used `localeCompare` for both the group-name sort and the same-column item-id sort — `localeCompare`'s result can depend on the OS/ICU locale, which is exactly the kind of per-device difference decision 8 was meant to rule out. Moving to nested groups required a new, tree-aware comparator anyway (`compareGroupPaths`, which also has to guarantee that any group sorts before its own descendants), so the ordinal fix rides along on the same change. `columnLayout`'s item-id sort was switched from `localeCompare` to plain `<`/`>` for the same reason.

@@ -7,6 +7,7 @@ import cytoscape, {
 	type StylesheetJson,
 } from 'cytoscape';
 import { ItemView, Keymap, Menu, Notice, Scope, setIcon, setTooltip, type ViewStateResult, type WorkspaceLeaf } from 'obsidian';
+import { sanitizeGroupPath, type GroupPath } from './folders';
 import { columnLayout, LAYOUT, type LayoutBlock } from './layout';
 import { TextPromptModal } from './modals';
 import { assignTypeSlots, buildStylesheet, readTheme, TYPE_PALETTE_SIZE } from './theme';
@@ -228,23 +229,34 @@ export class StoryWebView extends ItemView {
 		const typeSlots = assignTypeSlots(model.types, TYPE_PALETTE_SIZE);
 
 		cy.batch(() => {
-			for (const name of model.groups) {
-				const id = groupId(name);
-				wanted.add(id);
-				if (cy.getElementById(id).empty()) {
-					cy.add({ group: 'nodes', data: { id, label: name, name, kind: 'group' }, classes: 'group' });
+			// Parent-before-child order (model.ts guarantees this), so a
+			// group's own `parent` always already exists when it's added.
+			for (const g of model.groups) {
+				wanted.add(g.id);
+				const existing = cy.getElementById(g.id);
+				if (existing.empty()) {
+					cy.add({
+						group: 'nodes',
+						data: { id: g.id, label: g.label, name: g.label, path: g.path, depth: g.depth, kind: 'group', ...(g.parentId ? { parent: g.parentId } : {}) },
+						classes: 'group',
+					});
+					continue;
 				}
+				existing.data({ label: g.label, name: g.label, path: g.path, depth: g.depth });
+				const currentParent = existing.isChild() ? existing.parent().first().id() : null;
+				// A folder was itself moved to a different parent folder outside the plugin.
+				if (currentParent !== g.parentId) existing.move({ parent: g.parentId });
 			}
 
 			for (const n of model.nodes) {
 				wanted.add(n.id);
-				const parent = n.group ? groupId(n.group) : null;
+				const parent = n.group !== '' ? groupId(n.group) : null;
 				let node = cy.getElementById(n.id) as NodeSingular;
 
 				if (node.empty()) {
 					cy.add({
 						group: 'nodes',
-						data: { id: n.id, label: n.label, path: n.path, kind: 'note', ...(n.type ? { typeSlot: typeSlots.get(n.type) } : {}), ...(parent ? { parent } : {}) },
+						data: { id: n.id, label: n.label, path: n.path, group: n.group, kind: 'note', ...(n.type ? { typeSlot: typeSlots.get(n.type) } : {}), ...(parent ? { parent } : {}) },
 						classes: 'note',
 						...(n.position ? { position: { ...n.position } } : {}),
 					});
@@ -253,6 +265,7 @@ export class StoryWebView extends ItemView {
 				}
 
 				node.data('label', n.label);
+				node.data('group', n.group);
 				if (n.type) node.data('typeSlot', typeSlots.get(n.type));
 				else node.removeData('typeSlot');
 				const currentParent = node.isChild() ? node.parent().first().id() : null;
@@ -298,12 +311,12 @@ export class StoryWebView extends ItemView {
 
 		if (unplaced.length === notes.length) {
 			// Nothing has a position yet (first open): lay everything out in columns.
-			const blocks = new Map<string | null, LayoutBlock>();
+			const blocks = new Map<GroupPath, LayoutBlock>();
 			notes.forEach((n) => {
-				const group = n.isChild() ? (n.parent().first().data('name') as string) : null;
-				const block = blocks.get(group) ?? { group, items: [] };
+				const groupPath = (n.data('group') as GroupPath | undefined) ?? '';
+				const block = blocks.get(groupPath) ?? { groupPath, items: [] };
 				block.items.push({ id: n.id(), width: n.outerWidth(), height: n.outerHeight() });
-				blocks.set(group, block);
+				blocks.set(groupPath, block);
 			});
 			const positions = columnLayout([...blocks.values()]);
 			cy.batch(() => notes.forEach((n) => void n.position({ ...positions.get(n.id())! })));
@@ -595,7 +608,7 @@ export class StoryWebView extends ItemView {
 
 	private fillNoteMenu(menu: Menu, node: NodeSingular): void {
 		const path = node.data('path') as string;
-		const group = node.isChild() ? (node.parent().first().data('name') as string) : null;
+		const group = (node.data('group') as GroupPath | undefined) ?? '';
 
 		menu.addItem((i) => i.setTitle('Open note').setIcon('file-text').onClick(() => void this.openNote(path)));
 		menu.addItem((i) =>
@@ -611,35 +624,41 @@ export class StoryWebView extends ItemView {
 		menu.addItem((i) => i.setTitle('Connect from here…').setIcon('link').onClick(() => this.startConnectFrom(node)));
 		menu.addItem((i) =>
 			i
-				.setTitle(group ? 'Move to group…' : 'Add to group…')
+				.setTitle(group === '' ? 'Add to group…' : 'Move to group…')
 				.setIcon('box-select')
-				.onClick(() => this.promptGroup(path, group)),
+				.onClick(() => this.promptMoveToGroup(path, group)),
 		);
-		if (group) {
+		if (group !== '') {
 			menu.addItem((i) =>
 				i
 					.setTitle(`Remove from “${group}”`)
 					.setIcon('x')
-					.onClick(() => void this.store.setGroup([path], null)),
+					.onClick(() => void this.moveNote(path, '')),
 			);
 		}
 	}
 
 	private fillGroupMenu(menu: Menu, node: NodeSingular): void {
-		const name = node.data('name') as string;
+		const path = node.data('path') as GroupPath;
+		const label = node.data('label') as string;
 		menu.addItem((i) =>
 			i
 				.setTitle('Rename group…')
 				.setIcon('pencil')
-				.onClick(() => this.promptRenameGroup(name)),
+				.onClick(() => this.promptRenameGroup(path, label)),
 		);
 		menu.addItem((i) =>
 			i
 				.setTitle('Ungroup')
 				.setIcon('ungroup')
 				.onClick(async () => {
-					// Every note in the folder with this group, not just the visible (filtered) ones.
-					await this.store.renameGroup(name, '');
+					try {
+						// Moves every note and subfolder in this group up one level — not just what the type filter shows.
+						await this.store.ungroupFolder(path);
+					} catch (err) {
+						console.error('[story-web] ungroup failed', err);
+						new Notice(`Could not ungroup: ${err instanceof Error ? err.message : String(err)}`);
+					}
 				}),
 		);
 	}
@@ -666,27 +685,41 @@ export class StoryWebView extends ItemView {
 		menu.addItem((i) => i.setTitle('Open source note').setIcon('file-text').onClick(() => void this.openNote(sourcePath)));
 	}
 
-	private promptGroup(path: string, current: string | null): void {
+	/** Moves a note's file into `group`'s folder ('' = the root), reporting any failure — file moves, unlike frontmatter writes, can fail (name collisions, concurrent deletes). */
+	private async moveNote(path: string, group: GroupPath): Promise<void> {
+		try {
+			await this.store.moveNoteToGroup(path, group);
+		} catch (err) {
+			console.error('[story-web] move to group failed', err);
+			new Notice(`Could not move note: ${err instanceof Error ? err.message : String(err)}`);
+		}
+	}
+
+	private promptMoveToGroup(path: string, current: GroupPath): void {
 		new TextPromptModal(this.app, {
-			title: current ? 'Move to group' : 'Add to group',
-			label: 'Group name',
-			initial: current ?? '',
+			title: current === '' ? 'Add to group' : 'Move to group',
+			label: 'Group (use “/” to nest, e.g. Act 1/heist)',
+			initial: current,
 			suggestions: this.store.existingGroups().filter((g) => g !== current),
-			cta: 'Save',
-			onSubmit: (name) => this.store.setGroup([path], name),
+			cta: 'Move',
+			onSubmit: (raw) => this.moveNote(path, sanitizeGroupPath(raw)),
 		}).open();
 	}
 
-	private promptRenameGroup(name: string): void {
+	private promptRenameGroup(path: GroupPath, currentLabel: string): void {
 		new TextPromptModal(this.app, {
 			title: 'Rename group',
 			label: 'New name',
-			initial: name,
+			initial: currentLabel,
 			cta: 'Rename',
 			onSubmit: async (to) => {
-				if (to === name) return;
-				const n = await this.store.renameGroup(name, to);
-				new Notice(`Renamed group on ${n} note${n === 1 ? '' : 's'}.`);
+				if (to.trim() === currentLabel) return;
+				try {
+					await this.store.renameGroup(path, to);
+				} catch (err) {
+					console.error('[story-web] rename group failed', err);
+					new Notice(`Could not rename group: ${err instanceof Error ? err.message : String(err)}`);
+				}
 			},
 		}).open();
 	}

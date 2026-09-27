@@ -39,9 +39,9 @@ export default class StoryWebPlugin extends Plugin {
 	}
 
 	openCapture(): void {
-		new CaptureModal(this.app, async (title, blurb) => {
+		new CaptureModal(this.app, this.store.existingGroups(), async (title, blurb, group) => {
 			try {
-				const file = await this.store.capture(title, blurb, this.settings.defaultType || null);
+				const file = await this.store.capture(title, blurb, this.settings.defaultType || null, group);
 				if (this.settings.openAfterCapture) await this.app.workspace.getLeaf('tab').openFile(file);
 				else new Notice(`Created ${file.basename}`);
 			} catch (err) {

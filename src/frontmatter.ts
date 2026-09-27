@@ -51,13 +51,6 @@ export function removeConnection(fm: Frontmatter, targetPath: string, resolve: L
 	return removed;
 }
 
-/** Set or clear (`null` / blank) the `group` key. */
-export function setGroup(fm: Frontmatter, group: string | null): void {
-	const name = group?.trim() ?? '';
-	if (name === '') delete fm[FM.group];
-	else fm[FM.group] = name;
-}
-
 /** Build the frontmatter object for a freshly captured note. Omits empty optional fields. */
 export function newNoteFrontmatter(blurb: string, type: string | null): Frontmatter {
 	const fm: Frontmatter = {};

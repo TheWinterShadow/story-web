@@ -1,13 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-	addConnection,
-	newNoteFrontmatter,
-	removeConnection,
-	sanitizeTitle,
-	setGroup,
-	setPosition,
-	type LinkResolver,
-} from '../src/frontmatter';
+import { addConnection, newNoteFrontmatter, removeConnection, sanitizeTitle, setPosition, type LinkResolver } from '../src/frontmatter';
 
 /** Resolves bare names inside the `P/` folder, like Obsidian's shortest-path links. */
 const resolve: LinkResolver = (linkpath) => {
@@ -66,20 +58,6 @@ describe('removeConnection', () => {
 		const fm: Record<string, unknown> = { connects_to: ['[[A]]', '[[Missing]]'] };
 		expect(removeConnection(fm, 'P/B.md', resolve)).toBe(0);
 		expect(fm.connects_to).toEqual(['[[A]]', '[[Missing]]']);
-	});
-});
-
-describe('setGroup', () => {
-	it('sets a trimmed name', () => {
-		const fm: Record<string, unknown> = {};
-		setGroup(fm, '  Act 1 ');
-		expect(fm.group).toBe('Act 1');
-	});
-
-	it.each([[null], [''], ['   ']])('clears the key for %j', (value) => {
-		const fm: Record<string, unknown> = { group: 'Act 1', blurb: 'b' };
-		setGroup(fm, value);
-		expect(fm).toEqual({ blurb: 'b' });
 	});
 });
 

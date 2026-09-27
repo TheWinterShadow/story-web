@@ -1,19 +1,22 @@
 /**
- * The only module that reads or writes the vault. Everything it writes goes
- * through `processFrontMatter`, so note bodies are never touched.
+ * The only module that reads or writes the vault. Note content/position/links
+ * go through `processFrontMatter`, so note bodies are never touched. Groups
+ * are real folders, so group operations are real file moves and renames —
+ * see docs/DECISIONS.md for why.
  */
 import { App, normalizePath, stringifyYaml, TFile, TFolder, Vault } from 'obsidian';
+import { addConnection, newNoteFrontmatter, removeConnection, sanitizeTitle, setPosition, type LinkResolver } from './frontmatter';
 import {
-	addConnection,
-	newNoteFrontmatter,
-	removeConnection,
-	sanitizeTitle,
-	setGroup,
-	setPosition,
-	type LinkResolver,
-} from './frontmatter';
+	absoluteGroupPath,
+	compareGroupPaths,
+	groupParentPath,
+	parentFolderPath,
+	relativeGroupPath,
+	renamedGroupPath,
+	type GroupPath,
+} from './folders';
 import { parseLinkList } from './links';
-import { FM, readString, type NoteInfo, type Position } from './model';
+import { FM, type NoteInfo, type Position } from './model';
 
 /** How long a just-written position overrides what the metadata cache says (covers the write → re-index gap). */
 const RECENT_WRITE_MS = 3000;
@@ -80,6 +83,7 @@ export class NoteStore {
 				frontmatter: recent && !frontmatter ? { [FM.x]: recent.x, [FM.y]: recent.y } : frontmatter,
 				bodyLinks: resolveAll((cache.links ?? []).map((l) => l.link.split('#')[0] ?? '').filter(Boolean)),
 				manualLinks: resolveAll(parseLinkList(cache.frontmatter?.[FM.connects])),
+				group: relativeGroupPath(file.parent?.path ?? this.folder, this.folder),
 			});
 		}
 		return out;
@@ -150,44 +154,81 @@ export class NoteStore {
 		return removed;
 	}
 
-	async setGroup(paths: string[], group: string | null): Promise<void> {
-		await Promise.all(
-			paths.map(async (path) => {
-				const file = this.fileAt(path);
-				if (file) await this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => setGroup(fm, group));
-			}),
-		);
+	// ---- groups (real folders) ----------------------------------------------
+
+	/** Every existing group (subfolder, any depth) under the configured folder, deepest-safe, sorted for suggestion lists. */
+	existingGroups(): GroupPath[] {
+		const root = this.app.vault.getAbstractFileByPath(this.folder);
+		if (!(root instanceof TFolder)) return [];
+		const out: GroupPath[] = [];
+		Vault.recurseChildren(root, (f) => {
+			if (f instanceof TFolder && f.path !== this.folder) out.push(relativeGroupPath(f.path, this.folder));
+		});
+		return out.sort(compareGroupPaths);
 	}
 
-	/** Rewrites `group` on every in-scope note currently in `from`, including notes hidden by the type filter. */
-	async renameGroup(from: string, to: string): Promise<number> {
-		const members = this.files().filter(
-			(f) => readString(this.app.metadataCache.getFileCache(f)?.frontmatter, FM.group) === from,
-		);
-		await this.setGroup(
-			members.map((f) => f.path),
-			to,
-		);
-		return members.length;
-	}
-
-	existingGroups(): string[] {
-		const names = new Set<string>();
-		for (const f of this.files()) {
-			const g = readString(this.app.metadataCache.getFileCache(f)?.frontmatter, FM.group);
-			if (g) names.add(g);
+	/** Moves a note's file into the folder for `group` ('' = the root folder itself), creating it if needed. A no-op if it's already there. */
+	async moveNoteToGroup(notePath: string, group: GroupPath): Promise<TFile> {
+		const file = this.fileAt(notePath);
+		if (!file) throw new Error('Note no longer exists');
+		const targetFolder = absoluteGroupPath(this.folder, group);
+		let path = normalizePath(`${targetFolder}/${file.name}`);
+		if (path === file.path) return file;
+		await this.ensureFolder(targetFolder);
+		for (let n = 2; this.app.vault.getAbstractFileByPath(path); n++) {
+			path = normalizePath(`${targetFolder}/${file.basename} ${n}.md`);
 		}
-		return [...names].sort();
+		await this.app.vault.rename(file, path);
+		return file;
 	}
 
-	async capture(title: string, blurb: string, type: string | null): Promise<TFile> {
+	/** Renames just a group's own (leaf) folder segment — Plots/Act 1/Heist → Plots/Act 1/Chase for renameGroup("Act 1/Heist", "Chase"). Returns the new group path. */
+	async renameGroup(group: GroupPath, newLeaf: string): Promise<GroupPath> {
+		const leaf = sanitizeTitle(newLeaf);
+		if (leaf === '') throw new Error('Group name has no usable characters');
+		const folder = this.app.vault.getAbstractFileByPath(absoluteGroupPath(this.folder, group));
+		if (!(folder instanceof TFolder)) throw new Error('Group no longer exists');
+		const next = renamedGroupPath(group, leaf);
+		const nextAbsolute = absoluteGroupPath(this.folder, next);
+		if (nextAbsolute === folder.path) return group;
+		if (this.app.vault.getAbstractFileByPath(nextAbsolute)) throw new Error(`"${next}" already exists`);
+		await this.app.vault.rename(folder, nextAbsolute);
+		return next;
+	}
+
+	/**
+	 * Dissolves one grouping level: every direct child of the group's folder —
+	 * both notes and subfolders (which keep their own nested structure) — moves
+	 * up into the group's parent folder, then the now-empty folder is trashed.
+	 */
+	async ungroupFolder(group: GroupPath): Promise<void> {
+		const folder = this.app.vault.getAbstractFileByPath(absoluteGroupPath(this.folder, group));
+		if (!(folder instanceof TFolder)) throw new Error('Group no longer exists');
+		const parentFolder = absoluteGroupPath(this.folder, groupParentPath(group));
+		// Snapshot first: each rename below changes the live vault, but must not change which children we process.
+		for (const child of [...folder.children]) {
+			const ext = child instanceof TFile ? '.md' : '';
+			const base = child instanceof TFile ? child.basename : child.name;
+			let target = normalizePath(`${parentFolder}/${base}${ext}`);
+			for (let n = 2; this.app.vault.getAbstractFileByPath(target); n++) {
+				target = normalizePath(`${parentFolder}/${base} ${n}${ext}`);
+			}
+			await this.app.vault.rename(child, target);
+		}
+		await this.app.fileManager.trashFile(folder);
+	}
+
+	// ---- capture -------------------------------------------------------------
+
+	async capture(title: string, blurb: string, type: string | null, group: GroupPath): Promise<TFile> {
 		const base = sanitizeTitle(title);
 		if (base === '') throw new Error('Title has no usable characters');
-		await this.ensureFolder(this.folder);
+		const targetFolder = absoluteGroupPath(this.folder, group);
+		await this.ensureFolder(targetFolder);
 
-		let path = normalizePath(`${this.folder}/${base}.md`);
+		let path = normalizePath(`${targetFolder}/${base}.md`);
 		for (let n = 2; this.app.vault.getAbstractFileByPath(path); n++) {
-			path = normalizePath(`${this.folder}/${base} ${n}.md`);
+			path = normalizePath(`${targetFolder}/${base} ${n}.md`);
 		}
 
 		const fm = newNoteFrontmatter(blurb, type);
@@ -195,10 +236,14 @@ export class NoteStore {
 		return this.app.vault.create(path, content);
 	}
 
+	/** Creates every folder in `path` that doesn't exist yet (mkdir -p). */
 	private async ensureFolder(path: string): Promise<void> {
 		const existing = this.app.vault.getAbstractFileByPath(path);
 		if (existing instanceof TFolder) return;
 		if (existing) throw new Error(`"${path}" exists but is not a folder`);
+		const parent = parentFolderPath(path);
+		if (parent !== '') await this.ensureFolder(parent);
+		if (this.app.vault.getAbstractFileByPath(path) instanceof TFolder) return; // created by the recursive call above
 		await this.app.vault.createFolder(path);
 	}
 }

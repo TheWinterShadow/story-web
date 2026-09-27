@@ -250,10 +250,13 @@ export function buildStylesheet(t: Theme, opts: StyleOptions): StylesheetJson {
 				color: t.faint,
 				padding: '20px',
 				'background-color': t.groupFill,
-				'background-opacity': 0.7,
+				// A nested group is drawn on top of its container, so a bit more
+				// opacity per level of depth is what makes it read as "inside"
+				// rather than blending into its parent's fill.
+				'background-opacity': (ele: NodeSingular) => Math.min(0.85, 0.45 + Number(ele.data('depth') ?? 0) * 0.15),
 				'border-width': 1,
 				'border-color': t.border,
-				'border-opacity': 0.6,
+				'border-opacity': (ele: NodeSingular) => Math.min(0.9, 0.55 + Number(ele.data('depth') ?? 0) * 0.1),
 			},
 		},
 		{ selector: 'node.group.hover', style: { 'border-opacity': 1, color: t.muted } },

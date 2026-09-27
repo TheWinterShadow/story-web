@@ -1,16 +1,22 @@
 import { App, Modal, Setting } from 'obsidian';
+import { sanitizeGroupPath, type GroupPath } from './folders';
 
 /**
- * Quick capture: title + one-line blurb. Enter in the title jumps to the blurb,
- * Enter in the blurb submits — so the whole flow is type, Enter, type, Enter.
+ * Quick capture: title + one-line blurb, with an optional group. Enter in the
+ * title jumps to the blurb, Enter in the blurb submits — so the fast path
+ * (no group) is still exactly type, Enter, type, Enter. The group field is a
+ * genuinely optional detour: reach it with Tab or a click, and it submits on
+ * its own Enter too.
  */
 export class CaptureModal extends Modal {
 	private title = '';
 	private blurb = '';
+	private group = '';
 
 	constructor(
 		app: App,
-		private readonly onSubmit: (title: string, blurb: string) => Promise<void>,
+		private readonly existingGroups: GroupPath[],
+		private readonly onSubmit: (title: string, blurb: string, group: GroupPath) => Promise<void>,
 	) {
 		super(app);
 	}
@@ -20,6 +26,7 @@ export class CaptureModal extends Modal {
 		this.contentEl.addClass('story-web-capture');
 
 		let blurbInput: HTMLInputElement | null = null;
+		let groupInput: HTMLInputElement | null = null;
 
 		new Setting(this.contentEl).setName('Title').addText((text) => {
 			text.setPlaceholder('The heist goes wrong').onChange((v) => (this.title = v));
@@ -43,6 +50,30 @@ export class CaptureModal extends Modal {
 			});
 		});
 
+		new Setting(this.contentEl)
+			.setName('Group')
+			.setDesc('Optional — leave blank to skip. Puts the note in that folder; “/” nests, e.g. Act 1/heist.')
+			.addText((text) => {
+				groupInput = text.inputEl;
+				text.setPlaceholder('None').onChange((v) => (this.group = v));
+				text.inputEl.addEventListener('keydown', (evt) => {
+					if (evt.key === 'Enter' && !evt.isComposing) {
+						evt.preventDefault();
+						void this.submit();
+					}
+				});
+			});
+
+		if (this.existingGroups.length > 0) {
+			const list = this.contentEl.createDiv({ cls: 'story-web-suggestions' });
+			for (const g of this.existingGroups) {
+				list.createEl('button', { text: g }).addEventListener('click', () => {
+					this.group = g;
+					if (groupInput) groupInput.value = g;
+				});
+			}
+		}
+
 		new Setting(this.contentEl).addButton((btn) =>
 			btn
 				.setButtonText('Create')
@@ -53,7 +84,7 @@ export class CaptureModal extends Modal {
 
 	private async submit(): Promise<void> {
 		if (this.title.trim() === '') return;
-		await this.onSubmit(this.title, this.blurb);
+		await this.onSubmit(this.title, this.blurb, sanitizeGroupPath(this.group));
 		this.close();
 	}
 
