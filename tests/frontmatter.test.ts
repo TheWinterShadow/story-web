@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addConnection, newNoteFrontmatter, removeConnection, sanitizeTitle, setPosition, type LinkResolver } from '../src/frontmatter';
+import { addConnection, newNoteFrontmatter, removeConnection, sanitizeTitle, setColor, setPosition, type LinkResolver } from '../src/frontmatter';
 
 /** Resolves bare names inside the `P/` folder, like Obsidian's shortest-path links. */
 const resolve: LinkResolver = (linkpath) => {
@@ -58,6 +58,20 @@ describe('removeConnection', () => {
 		const fm: Record<string, unknown> = { connects_to: ['[[A]]', '[[Missing]]'] };
 		expect(removeConnection(fm, 'P/B.md', resolve)).toBe(0);
 		expect(fm.connects_to).toEqual(['[[A]]', '[[Missing]]']);
+	});
+});
+
+describe('setColor', () => {
+	it('sets the colour', () => {
+		const fm: Record<string, unknown> = {};
+		setColor(fm, 'green');
+		expect(fm.color).toBe('green');
+	});
+
+	it('clears it back to automatic on null', () => {
+		const fm: Record<string, unknown> = { color: 'green', blurb: 'b' };
+		setColor(fm, null);
+		expect(fm).toEqual({ blurb: 'b' });
 	});
 });
 

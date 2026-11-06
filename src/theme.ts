@@ -9,10 +9,11 @@
  * - Interaction states (hover, selection, connect source) use the theme accent.
  */
 import type { NodeSingular, StylesheetJson } from 'cytoscape';
+import { COLOR_NAMES, type ColorName } from './colors';
 import { wrapLabel, type WrappedLabel } from './wrap';
 
 /** Number of type colours; matches the palette `readTheme` resolves. */
-export const TYPE_PALETTE_SIZE = 8;
+export const TYPE_PALETTE_SIZE = COLOR_NAMES.length;
 
 export const NODE = {
 	fontSize: 13,
@@ -35,21 +36,22 @@ export interface Theme {
 	border: string;
 	borderHover: string;
 	accent: string;
-	/** Colours cycled through for `type` stripes. */
-	palette: string[];
+	/** Obsidian's eight theme colours, resolved to concrete CSS colours. Used for both the automatic per-type stripe and a manually picked note colour, so the two always match and share one picker. */
+	colors: Record<ColorName, string>;
 	font: string;
 }
 
-const PALETTE_VARS: [string, string][] = [
-	['--color-blue', '#086ddd'],
-	['--color-orange', '#ec7500'],
-	['--color-green', '#08b94e'],
-	['--color-purple', '#7852ee'],
-	['--color-red', '#e93147'],
-	['--color-cyan', '#00bfbc'],
-	['--color-pink', '#d53984'],
-	['--color-yellow', '#e0ac00'],
-];
+/** Fallback hex per colour, for themes/Obsidian versions missing a `--color-*` token. */
+const COLOR_FALLBACKS: Record<ColorName, string> = {
+	blue: '#086ddd',
+	orange: '#ec7500',
+	green: '#08b94e',
+	purple: '#7852ee',
+	red: '#e93147',
+	cyan: '#00bfbc',
+	pink: '#d53984',
+	yellow: '#e0ac00',
+};
 
 /**
  * Resolve theme variables to colours Cytoscape can parse. Themes may define
@@ -70,6 +72,9 @@ export function readTheme(el: HTMLElement): Theme {
 		const normalised = String(ctx.fillStyle).replace(/\s+/g, '');
 		return /^(#|rgba?\()/.test(normalised) ? normalised : fallback;
 	};
+	const colors = Object.fromEntries(
+		COLOR_NAMES.map((name) => [name, resolve(`--color-${name}`, COLOR_FALLBACKS[name])]),
+	) as Record<ColorName, string>;
 	const theme: Theme = {
 		text: resolve('--text-normal', '#222222'),
 		muted: resolve('--text-muted', '#5c5c5c'),
@@ -79,7 +84,7 @@ export function readTheme(el: HTMLElement): Theme {
 		border: resolve('--background-modifier-border', '#e0e0e0'),
 		borderHover: resolve('--background-modifier-border-hover', '#d4d4d4'),
 		accent: resolve('--interactive-accent', '#8a5cf5'),
-		palette: PALETTE_VARS.map(([v, fallback]) => resolve(v, fallback)),
+		colors,
 		font: getComputedStyle(el).getPropertyValue('--font-interface').trim() || 'sans-serif',
 	};
 	probe.remove();
@@ -149,12 +154,18 @@ export function buildStylesheet(t: Theme, opts: StyleOptions): StylesheetJson {
 		}
 		return w;
 	};
-	const isTyped = (ele: NodeSingular): boolean => ele.data('typeSlot') !== undefined;
+	const hasStripe = (ele: NodeSingular): boolean => ele.data('typeSlot') !== undefined || ele.data('color') !== undefined;
 	const labelWidth = (ele: NodeSingular): number =>
-		Math.max(wrapped(ele).width, 1) + (isTyped(ele) ? NODE.stripeGap : 0);
+		Math.max(wrapped(ele).width, 1) + (hasStripe(ele) ? NODE.stripeGap : 0);
 	const labelHeight = (ele: NodeSingular): number =>
 		Math.ceil(wrapped(ele).lines.length * NODE.fontSize * NODE.lineHeight);
-	const typeColor = (ele: NodeSingular): string => t.palette[Number(ele.data('typeSlot'))] ?? t.accent;
+	// A manually picked colour always wins over the type's automatic one.
+	const stripeColor = (ele: NodeSingular): string => {
+		const manual = ele.data('color') as ColorName | undefined;
+		if (manual) return t.colors[manual];
+		const name = COLOR_NAMES[Number(ele.data('typeSlot'))];
+		return name ? t.colors[name] : t.accent;
+	};
 	/** The stripe as a percentage of the card's full (padded) width. */
 	const stripeStop = (ele: NodeSingular): string =>
 		`${((NODE.stripe / (labelWidth(ele) + NODE.padding * 2)) * 100).toFixed(2)}%`;
@@ -205,14 +216,14 @@ export function buildStylesheet(t: Theme, opts: StyleOptions): StylesheetJson {
 			},
 		},
 		{
-			// Typed notes: a thin coloured stripe along the left edge.
-			selector: 'node.note[typeSlot]',
+			// Typed and/or manually coloured notes: a thin stripe along the left edge.
+			selector: 'node.note[typeSlot], node.note[color]',
 			style: {
 				'background-fill': 'linear-gradient',
 				'background-gradient-direction': 'to-right',
 				// Cytoscape parses these lists from space-separated strings; its typings only admit arrays.
 				'background-gradient-stop-colors': ((ele: NodeSingular) =>
-					[typeColor(ele), typeColor(ele), t.card, t.card].join(' ')) as unknown as string[],
+					[stripeColor(ele), stripeColor(ele), t.card, t.card].join(' ')) as unknown as string[],
 				'background-gradient-stop-positions': ((ele: NodeSingular) =>
 					['0%', stripeStop(ele), stripeStop(ele), '100%'].join(' ')) as unknown as string[],
 				'text-margin-x': NODE.stripeGap / 2,
@@ -261,6 +272,18 @@ export function buildStylesheet(t: Theme, opts: StyleOptions): StylesheetJson {
 		},
 		{ selector: 'node.group.hover', style: { 'border-opacity': 1, color: t.muted } },
 		{ selector: 'node.group:selected', style: { 'border-color': t.accent, 'border-opacity': 1, color: t.accent } },
+		{
+			// Live preview while dragging a note: the group box it would be dropped into.
+			selector: 'node.group.drop-target',
+			style: {
+				'border-color': t.accent,
+				'border-style': 'solid',
+				'border-width': 2,
+				'border-opacity': 1,
+				'background-opacity': 0.92,
+				color: t.accent,
+			},
+		},
 		{
 			selector: 'edge',
 			style: {

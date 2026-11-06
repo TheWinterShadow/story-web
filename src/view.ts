@@ -7,9 +7,11 @@ import cytoscape, {
 	type StylesheetJson,
 } from 'cytoscape';
 import { ItemView, Keymap, Menu, Notice, Scope, setIcon, setTooltip, type ViewStateResult, type WorkspaceLeaf } from 'obsidian';
+import { COLOR_NAMES, type ColorName } from './colors';
 import { sanitizeGroupPath, type GroupPath } from './folders';
+import { boxAtPoint, type Box } from './hittest';
 import { columnLayout, LAYOUT, type LayoutBlock } from './layout';
-import { TextPromptModal } from './modals';
+import { ColorPickerModal, TextPromptModal } from './modals';
 import { assignTypeSlots, buildStylesheet, readTheme, TYPE_PALETTE_SIZE } from './theme';
 import { buildGraph, groupId, type GraphModel, type Position, type TypeFilter } from './model';
 import type { NoteStore } from './store';
@@ -43,6 +45,11 @@ export class StoryWebView extends ItemView {
 	private connectMode = false;
 	private connectSource: NodeSingular | null = null;
 	private connectBtn: HTMLButtonElement | null = null;
+
+	/** Where each grabbed node started, so a failed drag-to-regroup can snap back instead of leaving the note in limbo. */
+	private dragStartPositions = new Map<string, Position>();
+	/** The group box currently highlighted as the drop target during a note drag, if any. */
+	private dropTargetGroupId: string | null = null;
 
 	private refreshTimer: number | null = null;
 	private suppressTapUntil = 0;
@@ -256,7 +263,16 @@ export class StoryWebView extends ItemView {
 				if (node.empty()) {
 					cy.add({
 						group: 'nodes',
-						data: { id: n.id, label: n.label, path: n.path, group: n.group, kind: 'note', ...(n.type ? { typeSlot: typeSlots.get(n.type) } : {}), ...(parent ? { parent } : {}) },
+						data: {
+							id: n.id,
+							label: n.label,
+							path: n.path,
+							group: n.group,
+							kind: 'note',
+							...(n.type ? { typeSlot: typeSlots.get(n.type) } : {}),
+							...(n.color ? { color: n.color } : {}),
+							...(parent ? { parent } : {}),
+						},
 						classes: 'note',
 						...(n.position ? { position: { ...n.position } } : {}),
 					});
@@ -268,6 +284,8 @@ export class StoryWebView extends ItemView {
 				node.data('group', n.group);
 				if (n.type) node.data('typeSlot', typeSlots.get(n.type));
 				else node.removeData('typeSlot');
+				if (n.color) node.data('color', n.color);
+				else node.removeData('color');
 				const currentParent = node.isChild() ? node.parent().first().id() : null;
 				if (currentParent !== parent) {
 					node.move({ parent });
@@ -359,6 +377,83 @@ export class StoryWebView extends ItemView {
 		});
 	}
 
+	// ---- drag-to-regroup -----------------------------------------------------
+
+	/** The id of the group box (if any) containing `node`'s current position — the deepest match, so dropping inside a nested box targets that box, not its parent. */
+	private boxUnderGroup(node: NodeSingular): string | null {
+		const cy = this.cy;
+		if (!cy) return null;
+		const pos = node.position();
+		const boxes: Box[] = cy.nodes('.group').map((g) => {
+			const bb = g.boundingBox();
+			return { id: g.id(), depth: Number(g.data('depth') ?? 0), x1: bb.x1, y1: bb.y1, x2: bb.x2, y2: bb.y2 };
+		});
+		return boxAtPoint(boxes, pos.x, pos.y);
+	}
+
+	private updateDropTarget(node: NodeSingular): void {
+		const target = this.boxUnderGroup(node);
+		if (target === this.dropTargetGroupId) return;
+		this.clearDropTarget();
+		this.dropTargetGroupId = target;
+		if (target) this.cy?.getElementById(target).addClass('drop-target');
+	}
+
+	private clearDropTarget(): void {
+		if (!this.dropTargetGroupId) return;
+		this.cy?.getElementById(this.dropTargetGroupId).removeClass('drop-target');
+		this.dropTargetGroupId = null;
+	}
+
+	/**
+	 * A note was dropped: if it's now sitting inside a different group's box
+	 * (or outside every box, having come from one) than its file's current
+	 * folder, move the file to match — this is what makes the graph a real
+	 * editing surface instead of just a viewer. Position is always saved;
+	 * if the move itself fails, the note snaps back to where the drag began
+	 * instead of being left at a spot that doesn't match its real folder.
+	 */
+	private async handleNoteDropped(node: NodeSingular): Promise<void> {
+		const cy = this.cy;
+		if (!cy) return;
+		const path = node.data('path') as string;
+		// Unaffected by the grab-time detach: it's a separate data field this
+		// plugin tracks (the note's real folder), not Cytoscape's own `parent`.
+		const currentGroup = (node.data('group') as GroupPath | undefined) ?? '';
+		const targetGroupId = this.boxUnderGroup(node);
+		const targetGroup = targetGroupId ? ((cy.getElementById(targetGroupId).data('path') as GroupPath | undefined) ?? '') : '';
+
+		// grab() always detaches a note from its parent for the drag (see its
+		// handler) — every path below must explicitly reattach it to wherever
+		// it's ending up, even when that's back where it started.
+		const reattach = (parent: string | null): void => {
+			if ((node.isChild() ? node.parent().first().id() : null) !== parent) node.move({ parent });
+		};
+
+		if (targetGroup === currentGroup) {
+			reattach(currentGroup === '' ? null : groupId(currentGroup));
+			this.persist(cy.collection(node));
+			this.dragStartPositions.delete(node.id());
+			return;
+		}
+
+		const dropped = { ...node.position() };
+		const ok = await this.moveNote(path, targetGroup);
+		if (ok) {
+			this.store.queuePosition(path, dropped);
+			// Reparent immediately rather than waiting for the vault-rename event's
+			// debounced refresh, so there's no quarter-second where the card sits
+			// detached (or under its old group) instead of its new one.
+			node.data('group', targetGroup);
+			reattach(targetGroupId);
+		} else {
+			const start = this.dragStartPositions.get(node.id());
+			if (start) node.position(start);
+			reattach(currentGroup === '' ? null : groupId(currentGroup));
+		}
+		this.dragStartPositions.delete(node.id());
+	}
+
 	private zoomBy(factor: number): void {
 		const cy = this.cy;
 		if (!cy) return;
@@ -443,10 +538,20 @@ export class StoryWebView extends ItemView {
 			if (e.target === cy && this.connectMode) this.clearConnectSource();
 		});
 
-		// Persist on release only — never mid-drag. Dragging a group box moves its members.
+		// Live preview while dragging a note: highlight the group box it would land in.
+		cy.on('drag', 'node.note', (e) => this.updateDropTarget(e.target as NodeSingular));
+
+		// Persist on release only — never mid-drag. Dragging a group box just
+		// repositions it and its members; dropping a note can also regroup it —
+		// see handleNoteDropped.
 		cy.on('dragfree', 'node', (e) => {
 			const node = e.target as NodeSingular;
-			this.persist(node.isParent() ? node.descendants('.note') : cy.collection(node));
+			this.clearDropTarget();
+			if (node.hasClass('group')) {
+				this.persist(node.descendants('.note'));
+				return;
+			}
+			void this.handleNoteDropped(node);
 		});
 
 		// Hover a note: emphasise it and its connections, fade the rest.
@@ -469,7 +574,18 @@ export class StoryWebView extends ItemView {
 		});
 		cy.on('mouseover', 'node.group', (e) => (e.target as NodeSingular).addClass('hover'));
 		cy.on('mouseout', 'node.group', (e) => (e.target as NodeSingular).removeClass('hover'));
-		cy.on('grab', 'node', () => cy.batch(() => cy.elements().removeClass('hover highlight faded')));
+		cy.on('grab', 'node', (e) => {
+			cy.batch(() => cy.elements().removeClass('hover highlight faded'));
+			const node = e.target as NodeSingular;
+			this.dragStartPositions.set(node.id(), { ...node.position() });
+			// Detach a note from its group for the drag: a compound group's box
+			// auto-stretches to keep containing all its children, including one
+			// still being dragged — left attached, the note's own original box
+			// would stretch to chase it anywhere, so every drop point would look
+			// like it's still "inside" that box. See handleNoteDropped, which
+			// reattaches it to wherever it actually lands.
+			if (node.hasClass('note') && node.isChild()) node.move({ parent: null });
+		});
 
 		// Keep the CSS dot grid locked to the graph as it pans and zooms.
 		cy.on('viewport', () => this.syncGrid());
@@ -620,6 +736,7 @@ export class StoryWebView extends ItemView {
 					if (file) await this.app.workspace.getLeaf('tab').openFile(file);
 				}),
 		);
+		menu.addItem((i) => i.setTitle('Set colour…').setIcon('palette').onClick(() => this.promptColor(node)));
 		menu.addSeparator();
 		menu.addItem((i) => i.setTitle('Connect from here…').setIcon('link').onClick(() => this.startConnectFrom(node)));
 		menu.addItem((i) =>
@@ -685,13 +802,15 @@ export class StoryWebView extends ItemView {
 		menu.addItem((i) => i.setTitle('Open source note').setIcon('file-text').onClick(() => void this.openNote(sourcePath)));
 	}
 
-	/** Moves a note's file into `group`'s folder ('' = the root), reporting any failure — file moves, unlike frontmatter writes, can fail (name collisions, concurrent deletes). */
-	private async moveNote(path: string, group: GroupPath): Promise<void> {
+	/** Moves a note's file into `group`'s folder ('' = the root), reporting any failure — file moves, unlike frontmatter writes, can fail (name collisions, concurrent deletes). Returns whether it succeeded. */
+	private async moveNote(path: string, group: GroupPath): Promise<boolean> {
 		try {
 			await this.store.moveNoteToGroup(path, group);
+			return true;
 		} catch (err) {
 			console.error('[story-web] move to group failed', err);
 			new Notice(`Could not move note: ${err instanceof Error ? err.message : String(err)}`);
+			return false;
 		}
 	}
 
@@ -702,7 +821,27 @@ export class StoryWebView extends ItemView {
 			initial: current,
 			suggestions: this.store.existingGroups().filter((g) => g !== current),
 			cta: 'Move',
-			onSubmit: (raw) => this.moveNote(path, sanitizeGroupPath(raw)),
+			onSubmit: async (raw) => {
+				await this.moveNote(path, sanitizeGroupPath(raw));
+			},
+		}).open();
+	}
+
+	private promptColor(node: NodeSingular): void {
+		const path = node.data('path') as string;
+		const current = (node.data('color') as ColorName | undefined) ?? null;
+		const theme = readTheme(this.contentEl);
+		new ColorPickerModal(this.app, {
+			colors: COLOR_NAMES.map((name) => ({ name, css: theme.colors[name] })),
+			current,
+			onPick: async (color) => {
+				try {
+					await this.store.setNoteColor(path, color);
+				} catch (err) {
+					console.error('[story-web] set colour failed', err);
+					new Notice(`Could not set colour: ${err instanceof Error ? err.message : String(err)}`);
+				}
+			},
 		}).open();
 	}
 

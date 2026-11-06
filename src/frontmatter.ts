@@ -5,6 +5,7 @@
  * Keeping them free of Obsidian imports makes the write-side logic testable
  * and guarantees the plugin never touches anything but these keys.
  */
+import type { ColorName } from './colors';
 import { parseLinkList, toWikilink } from './links';
 import { FM, type Position } from './model';
 
@@ -49,6 +50,12 @@ export function removeConnection(fm: Frontmatter, targetPath: string, resolve: L
 	if (kept.length === 0) delete fm[FM.connects];
 	else fm[FM.connects] = kept;
 	return removed;
+}
+
+/** Set or clear (`null`) the manual colour override. */
+export function setColor(fm: Frontmatter, color: ColorName | null): void {
+	if (color === null) delete fm[FM.color];
+	else fm[FM.color] = color;
 }
 
 /** Build the frontmatter object for a freshly captured note. Omits empty optional fields. */

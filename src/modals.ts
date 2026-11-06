@@ -1,4 +1,5 @@
 import { App, Modal, Setting } from 'obsidian';
+import type { ColorName } from './colors';
 import { sanitizeGroupPath, type GroupPath } from './folders';
 
 /**
@@ -152,6 +153,54 @@ export class TextPromptModal extends Modal {
 	private async submit(value: string): Promise<void> {
 		if (value.trim() === '') return;
 		await this.opts.onSubmit(value.trim());
+		this.close();
+	}
+
+	onClose(): void {
+		this.contentEl.empty();
+	}
+}
+
+/**
+ * A grid of colour swatches plus an "Automatic" option. Swatches, not a text
+ * field or a native `<input type=color>`: the eight choices are Obsidian's
+ * own theme colours (colors.ts), the same ones a note's type is auto-coloured
+ * from, so picking is a single tap and the result always matches the theme.
+ */
+export class ColorPickerModal extends Modal {
+	constructor(
+		app: App,
+		private readonly opts: {
+			colors: { name: ColorName; css: string }[];
+			current: ColorName | null;
+			onPick: (color: ColorName | null) => Promise<void>;
+		},
+	) {
+		super(app);
+	}
+
+	onOpen(): void {
+		this.setTitle('Set colour');
+		const grid = this.contentEl.createDiv({ cls: 'story-web-swatches' });
+
+		const auto = grid.createEl('button', {
+			cls: ['story-web-swatch', 'story-web-swatch-auto', ...(this.opts.current === null ? ['is-selected'] : [])].join(' '),
+			attr: { 'aria-label': 'Automatic — match the note’s type', type: 'button' },
+		});
+		auto.addEventListener('click', () => void this.pick(null));
+
+		for (const { name, css } of this.opts.colors) {
+			const btn = grid.createEl('button', {
+				cls: ['story-web-swatch', ...(this.opts.current === name ? ['is-selected'] : [])].join(' '),
+				attr: { 'aria-label': name, type: 'button' },
+			});
+			btn.setCssProps({ '--story-web-swatch-color': css });
+			btn.addEventListener('click', () => void this.pick(name));
+		}
+	}
+
+	private async pick(color: ColorName | null): Promise<void> {
+		await this.opts.onPick(color);
 		this.close();
 	}
 

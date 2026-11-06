@@ -5,11 +5,14 @@
  * frontmatter and computes each note's folder; everything here is plain
  * data so it can be unit tested.
  */
+import { isColorName, type ColorName } from './colors';
 import { compareGroupPaths, groupAncestry, groupDepth, groupLabel, groupParentPath, type GroupPath } from './folders';
 
 export const FM = {
 	blurb: 'blurb',
 	type: 'type',
+	/** Manual colour override — see colors.ts. Unset = automatic (by type). */
+	color: 'color',
 	connects: 'connects_to',
 	x: 'x',
 	y: 'y',
@@ -41,6 +44,8 @@ export interface GraphNode {
 	/** '' means ungrouped — never appears as a Cytoscape parent. */
 	group: GroupPath;
 	position: Position | null;
+	/** A manually picked colour, overriding the type's automatic one. null = automatic. */
+	color: ColorName | null;
 }
 
 export interface GraphEdge {
@@ -107,6 +112,12 @@ export function readPosition(fm: Record<string, unknown> | undefined): Position 
 	return x === null || y === null ? null : { x, y };
 }
 
+/** A hand-typed `color:` value that isn't one of the eight names (e.g. a typo, or an old free-form value) is treated the same as unset — automatic. */
+export function readColor(fm: Record<string, unknown> | undefined): ColorName | null {
+	const raw = readString(fm, FM.color);
+	return raw !== null && isColorName(raw) ? raw : null;
+}
+
 export function buildGraph(notes: NoteInfo[], filter: TypeFilter = null): GraphModel {
 	const types = new Set<string>();
 	let hasUntyped = false;
@@ -128,6 +139,7 @@ export function buildGraph(notes: NoteInfo[], filter: TypeFilter = null): GraphM
 			type,
 			group: note.group,
 			position: readPosition(fm),
+			color: readColor(fm),
 		});
 		// Every ancestor of a visible note's group is itself needed, as a
 		// container, even if no note sits directly inside it.

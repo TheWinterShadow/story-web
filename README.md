@@ -3,9 +3,11 @@
 An Obsidian plugin for quickly capturing plot points and campaign notes. Each one is a plain markdown note. Afterwards you can arrange, connect, and group them on an interactive graph.
 
 - **Quick capture:** type a title and a one-line blurb, and you're done. Picking a group is optional and doesn't slow that down.
-- **Card graph:** each note is a card showing its blurb, wrapped to a few lines (configurable). A coloured stripe marks its `type`. Click or tap a card to open the real note. Hovering a card highlights what it's connected to.
+- **Card graph:** each note is a card showing its blurb, wrapped to a few lines (configurable). A coloured stripe marks its `type`, or a colour you picked yourself. Click or tap a card to open the real note. Hovering a card highlights what it's connected to.
 - **Manual connections:** in connect mode, tap a source note and then a target note. `[[wikilinks]]` in note bodies are shown automatically as dashed edges.
-- **Groups are folders:** a note's group is just the subfolder it's in. Subfolders can nest as deep as you like — Plots/Act 1/Heist/ shows up as a box inside a box. Moving, renaming or ungrouping a note through the graph moves or renames the real file/folder.
+- **Groups are folders:** a note's group is just the subfolder it's in. Subfolders can nest as deep as you like — Plots/Act 1/Heist/ shows up as a box inside a box.
+- **Drag a card into (or out of) a group to regroup it:** the graph is a real editing surface, like a bubble chart — drop a card inside a box and its file moves into that folder; drag it out onto empty canvas and it moves back to the root. The box you're about to drop into lights up as you drag. The usual right-click *Add/Move/Remove* actions do the same thing, for when dragging across the whole graph isn't convenient.
+- **Colour-code any card:** right-click → *Set colour…* for one of eight swatches (the same colours your theme already uses for the automatic `type` stripe), or back to automatic.
 - **Desktop and mobile:** built for iPad as well as desktop, including pinch-zoom, pan, drag, tap, and long-press.
 - **No lock-in:** everything else is stored in YAML frontmatter. If you disable the plugin, your notes are still ordinary markdown in ordinary folders.
 
@@ -16,7 +18,8 @@ Notes live in one configurable folder (default `Plots/`), in any arrangement of 
 ```yaml
 ---
 blurb: "The vault is already empty when the crew breaks in"   # node label; falls back to the filename
-type: fiction                                                 # optional; the graph can filter by it
+type: fiction                                                 # optional; the graph can filter by it, and colours the stripe
+color: blue                                                   # optional; overrides the type's automatic stripe colour
 connects_to: ["[[Someone got there first]]"]                  # optional; manual edges, as wikilinks
 x: 120                                                        # written by the plugin when you move a node
 y: 340
@@ -24,6 +27,8 @@ y: 340
 
 The note body is yours. The plugin never modifies it.
 ```
+
+`color` is one of eight names — `blue`, `orange`, `green`, `purple`, `red`, `cyan`, `pink`, `yellow` — Obsidian's own theme colours, not free-form hex, so a manual pick and the automatic type colour always match the active theme and share one picker.
 
 Every field is optional. A note with no frontmatter still shows up, labelled with its filename. `type` can be any value you like, for example `fiction`, `campaign`, or `worldbuilding`.
 
@@ -36,7 +41,9 @@ Every field is optional. A note with no frontmatter still shows up, labelled wit
 | Open the graph | Ribbon icon or **Story Web: Open graph** | same |
 | New plot point | **+ New** on the graph, **Story Web: New plot point** (bind a hotkey in Settings → Hotkeys), or the lightbulb ribbon icon | same |
 | Open a note | Click (Cmd/Ctrl-click opens a new tab) | Tap |
-| Move a node | Drag | Drag |
+| Move a card within its group | Drag | Drag |
+| Regroup a card | Drag it into a different box, or out onto empty canvas to ungroup | same |
+| Set a card's colour | Right-click → *Set colour…* | Long-press a note → *Set colour…* |
 | Pan / zoom | Drag background / scroll wheel, or the zoom buttons bottom right | One-finger drag / pinch, or the zoom buttons |
 | Fit everything in view | The frame button under the zoom buttons | same |
 | Connect | **Connect** (top right), then click the note to start from, then the note it leads to | same, with taps. Or long-press a note → *Connect from here…* |
@@ -100,7 +107,9 @@ src/
   frontmatter.ts  pure: frontmatter mutations used inside processFrontMatter
   folders.ts      pure: group-path arithmetic (a group is a folder — see model.ts + store.ts)
   links.ts        pure: parsing `connects_to` wikilinks
-  theme.ts        visual design: theme colours → Cytoscape stylesheet, type colours
+  colors.ts       pure: the eight named colours notes can be coded with
+  hittest.ts      pure: point-in-box geometry for drag-to-regroup
+  theme.ts        visual design: theme colours → Cytoscape stylesheet, type/manual colours
   wrap.ts         pure: word-wrapping blurbs into card lines
   layout.ts       pure: initial column layout
   modals.ts       quick capture + text prompt

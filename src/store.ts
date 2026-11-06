@@ -5,7 +5,8 @@
  * see docs/DECISIONS.md for why.
  */
 import { App, normalizePath, stringifyYaml, TFile, TFolder, Vault } from 'obsidian';
-import { addConnection, newNoteFrontmatter, removeConnection, sanitizeTitle, setPosition, type LinkResolver } from './frontmatter';
+import type { ColorName } from './colors';
+import { addConnection, newNoteFrontmatter, removeConnection, sanitizeTitle, setColor, setPosition, type LinkResolver } from './frontmatter';
 import {
 	absoluteGroupPath,
 	compareGroupPaths,
@@ -152,6 +153,13 @@ export class NoteStore {
 			removed = removeConnection(fm, targetPath, this.resolver(source.path));
 		});
 		return removed;
+	}
+
+	/** Sets or clears (`null`) a note's manual colour override. */
+	async setNoteColor(path: string, color: ColorName | null): Promise<void> {
+		const file = this.fileAt(path);
+		if (!file) throw new Error('Note no longer exists');
+		await this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => setColor(fm, color));
 	}
 
 	// ---- groups (real folders) ----------------------------------------------

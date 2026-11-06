@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildGraph, edgeId, nodeId, readPosition, type NoteInfo } from '../src/model';
+import { buildGraph, edgeId, nodeId, readColor, readPosition, type NoteInfo } from '../src/model';
 
 const note = (
 	path: string,
@@ -38,6 +38,11 @@ describe('buildGraph', () => {
 	it('drops self-links and links leaving the node set', () => {
 		const g = buildGraph([note('P/A.md', {}, { manualLinks: ['P/A.md', 'Elsewhere/X.md'] })]);
 		expect(g.edges).toEqual([]);
+	});
+
+	it('carries a manual colour through to the node, defaulting to automatic (null)', () => {
+		const g = buildGraph([note('P/A.md', { color: 'pink' }), note('P/B.md')]);
+		expect(g.nodes.map((n) => n.color)).toEqual(['pink', null]);
 	});
 
 	it("a note's group comes from where its file is, not from frontmatter", () => {
@@ -108,6 +113,20 @@ describe('buildGraph', () => {
 		const g = buildGraph(notes, 'fiction');
 		expect(g.nodes.map((n) => n.path)).toEqual(['P/B.md']);
 		expect(g.groups.map((x) => x.path)).toEqual(['Act 1', 'Act 1/Heist']);
+	});
+});
+
+describe('readColor', () => {
+	it('reads one of the eight named colours', () => {
+		expect(readColor({ color: 'blue' })).toBe('blue');
+	});
+
+	it('treats a missing, blank or unrecognised value as automatic (null)', () => {
+		expect(readColor(undefined)).toBeNull();
+		expect(readColor({})).toBeNull();
+		expect(readColor({ color: '' })).toBeNull();
+		expect(readColor({ color: 'Blue' })).toBeNull(); // not case-insensitive — must match a real token
+		expect(readColor({ color: '#ff0000' })).toBeNull(); // free-form hex isn't a supported value
 	});
 });
 
