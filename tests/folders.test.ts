@@ -6,9 +6,11 @@ import {
 	groupDepth,
 	groupLabel,
 	groupParentPath,
+	isWithin,
 	parentFolderPath,
 	relativeGroupPath,
 	renamedGroupPath,
+	renestedGroupPath,
 	sanitizeGroupPath,
 } from '../src/folders';
 
@@ -103,6 +105,50 @@ describe('renamedGroupPath', () => {
 
 	it('works on a top-level group', () => {
 		expect(renamedGroupPath('Act 1', 'Act One')).toBe('Act One');
+	});
+});
+
+describe('renestedGroupPath', () => {
+	it('moves a top-level group under a new parent, keeping its leaf name', () => {
+		expect(renestedGroupPath('Saltmarsh arc', 'Act 1')).toBe('Act 1/Saltmarsh arc');
+	});
+
+	it('moves a nested group to a different parent', () => {
+		expect(renestedGroupPath('Act 1/Heist prep', 'Saltmarsh arc')).toBe('Saltmarsh arc/Heist prep');
+	});
+
+	it('moves a nested group up to top-level', () => {
+		expect(renestedGroupPath('Act 1/Heist prep', '')).toBe('Heist prep');
+	});
+
+	it('is the inverse of renamedGroupPath: one changes the parent, the other the leaf', () => {
+		const path = 'Act 1/Heist prep';
+		expect(renestedGroupPath(path, groupParentPath(path))).toBe(path); // moving to its own current parent is a no-op
+		expect(renamedGroupPath(path, groupLabel(path))).toBe(path); // renaming to its own current leaf is a no-op
+	});
+});
+
+describe('isWithin', () => {
+	it('is true for the same path', () => {
+		expect(isWithin('Act 1', 'Act 1')).toBe(true);
+	});
+
+	it('is true for a proper descendant, any depth', () => {
+		expect(isWithin('Act 1/Heist', 'Act 1')).toBe(true);
+		expect(isWithin('Act 1/Heist/Detail', 'Act 1')).toBe(true);
+	});
+
+	it('is false for an ancestor (wrong direction)', () => {
+		expect(isWithin('Act 1', 'Act 1/Heist')).toBe(false);
+	});
+
+	it('is false for an unrelated path, including a same-prefix sibling', () => {
+		expect(isWithin('Saltmarsh', 'Act 1')).toBe(false);
+		expect(isWithin('Act 10', 'Act 1')).toBe(false); // must not match on a bare string prefix without the '/'
+	});
+
+	it('is false for siblings sharing a parent', () => {
+		expect(isWithin('Act 1/Chase', 'Act 1/Heist')).toBe(false);
 	});
 });
 

@@ -65,6 +65,21 @@ export function renamedGroupPath(group: GroupPath, newLeaf: string): GroupPath {
 	return parent === '' ? newLeaf : `${parent}/${newLeaf}`;
 }
 
+/** The group path after moving `group`'s own folder to become a child of `newParent` ('' = top-level), keeping its own leaf name. The inverse of `renamedGroupPath`: that changes the leaf and keeps the parent, this changes the parent and keeps the leaf. */
+export function renestedGroupPath(group: GroupPath, newParent: GroupPath): GroupPath {
+	const leaf = groupLabel(group);
+	return newParent === '' ? leaf : `${newParent}/${leaf}`;
+}
+
+/**
+ * True if `path` is `base` itself, or nested anywhere inside it. Used to stop
+ * a group from being dropped into itself or one of its own subfolders — that
+ * would make a folder its own ancestor.
+ */
+export function isWithin(path: GroupPath, base: GroupPath): boolean {
+	return path === base || path.startsWith(`${base}/`);
+}
+
 /** Characters a folder-name segment can't contain — same set note titles avoid (frontmatter.ts), minus '/' itself since that's the deliberate group-path separator here. */
 const ILLEGAL_SEGMENT = /[\\:*?"<>|#^[\]]/g;
 

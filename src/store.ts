@@ -11,13 +11,15 @@ import {
 	absoluteGroupPath,
 	compareGroupPaths,
 	groupParentPath,
+	isWithin,
 	parentFolderPath,
 	relativeGroupPath,
 	renamedGroupPath,
+	renestedGroupPath,
 	type GroupPath,
 } from './folders';
 import { parseLinkList } from './links';
-import { FM, type NoteInfo, type Position } from './model';
+import { FM, readPosition, type NoteInfo, type Position } from './model';
 
 /** How long a just-written position overrides what the metadata cache says (covers the write → re-index gap). */
 const RECENT_WRITE_MS = 3000;
@@ -201,6 +203,46 @@ export class NoteStore {
 		if (nextAbsolute === folder.path) return group;
 		if (this.app.vault.getAbstractFileByPath(nextAbsolute)) throw new Error(`"${next}" already exists`);
 		await this.app.vault.rename(folder, nextAbsolute);
+		return next;
+	}
+
+	/**
+	 * Moves a whole group — and everything nested inside it, notes and
+	 * sub-groups alike, keeping their own relative structure — to become a
+	 * subfolder of `targetGroup` ('' = top-level). Keeps its own leaf name. A
+	 * no-op if it's already there.
+	 *
+	 * If `positionDelta` is given, every note anywhere in the moved subtree
+	 * has its stored x/y shifted by that amount. This is resolved against
+	 * fresh file references read *after* the rename, not whatever a caller
+	 * might have cached beforehand — every file inside a moved folder gets a
+	 * new `.path`, and writing a position under a path that's no longer live
+	 * would silently go nowhere.
+	 */
+	async moveGroupToGroup(group: GroupPath, targetGroup: GroupPath, positionDelta?: Position): Promise<GroupPath> {
+		if (isWithin(targetGroup, group)) throw new Error('Cannot move a group inside itself or one of its own subfolders');
+		const folder = this.app.vault.getAbstractFileByPath(absoluteGroupPath(this.folder, group));
+		if (!(folder instanceof TFolder)) throw new Error('Group no longer exists');
+		const next = renestedGroupPath(group, targetGroup);
+		if (next === group) return group;
+		const nextAbsolute = absoluteGroupPath(this.folder, next);
+		if (this.app.vault.getAbstractFileByPath(nextAbsolute)) throw new Error(`"${next}" already exists`);
+		await this.app.vault.rename(folder, nextAbsolute);
+
+		if (positionDelta && (positionDelta.x !== 0 || positionDelta.y !== 0)) {
+			const movedNotes: TFile[] = [];
+			Vault.recurseChildren(folder, (f) => {
+				if (f instanceof TFile && f.extension === 'md') movedNotes.push(f);
+			});
+			await Promise.all(
+				movedNotes.map((file) =>
+					this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
+						const pos = readPosition(fm);
+						if (pos) setPosition(fm, { x: pos.x + positionDelta.x, y: pos.y + positionDelta.y });
+					}),
+				),
+			);
+		}
 		return next;
 	}
 

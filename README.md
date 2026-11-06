@@ -7,6 +7,7 @@ An Obsidian plugin for quickly capturing plot points and campaign notes. Each on
 - **Manual connections:** in connect mode, tap a source note and then a target note. `[[wikilinks]]` in note bodies are shown automatically as dashed edges.
 - **Groups are folders:** a note's group is just the subfolder it's in. Subfolders can nest as deep as you like — Plots/Act 1/Heist/ shows up as a box inside a box.
 - **Drag a card into (or out of) a group to regroup it:** the graph is a real editing surface, like a bubble chart — drop a card inside a box and its file moves into that folder; drag it out onto empty canvas and it moves back to the root. The box you're about to drop into lights up as you drag. The usual right-click *Add/Move/Remove* actions do the same thing, for when dragging across the whole graph isn't convenient.
+- **Drag a group box into another group box to nest it:** moves the whole folder — and everything inside it — to become a subfolder of the one you dropped it on. Drag a nested group out onto empty canvas to make it top-level again. A group can't be dropped into itself or one of its own subfolders.
 - **Colour-code any card:** right-click → *Set colour…* for one of eight swatches (the same colours your theme already uses for the automatic `type` stripe), or back to automatic.
 - **Desktop and mobile:** built for iPad as well as desktop, including pinch-zoom, pan, drag, tap, and long-press.
 - **No lock-in:** everything else is stored in YAML frontmatter. If you disable the plugin, your notes are still ordinary markdown in ordinary folders.
@@ -43,6 +44,8 @@ Every field is optional. A note with no frontmatter still shows up, labelled wit
 | Open a note | Click (Cmd/Ctrl-click opens a new tab) | Tap |
 | Move a card within its group | Drag | Drag |
 | Regroup a card | Drag it into a different box, or out onto empty canvas to ungroup | same |
+| Nest a group inside another | Drag its box into the target box | same |
+| Move a group to top level | Drag its box out onto empty canvas, or right-click → *Move to top level* | same |
 | Set a card's colour | Right-click → *Set colour…* | Long-press a note → *Set colour…* |
 | Pan / zoom | Drag background / scroll wheel, or the zoom buttons bottom right | One-finger drag / pinch, or the zoom buttons |
 | Fit everything in view | The frame button under the zoom buttons | same |
@@ -51,6 +54,7 @@ Every field is optional. A note with no frontmatter still shows up, labelled wit
 | Add/move to a group | Right-click a note → *Add to group…* / *Move to group…* — moves the file | Long-press a note |
 | Remove from its group | Right-click a note → *Remove from "…"* — moves the file back to the root | Long-press a note |
 | Rename a group | Right-click the group box → *Rename group…* — renames the folder | Long-press the group box |
+| Move/nest a group by name | Right-click the group box → *Move group…* — moves the folder, with everything inside it | Long-press the group box |
 | Ungroup | Right-click the group box → *Ungroup* — moves its contents up one level, deletes the folder | Long-press the group box |
 | Leave connect mode | **Done** (the Connect button while active), or Esc | **Done** |
 

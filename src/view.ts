@@ -8,7 +8,7 @@ import cytoscape, {
 } from 'cytoscape';
 import { ItemView, Keymap, Menu, Notice, Scope, setIcon, setTooltip, type ViewStateResult, type WorkspaceLeaf } from 'obsidian';
 import { COLOR_NAMES, type ColorName } from './colors';
-import { sanitizeGroupPath, type GroupPath } from './folders';
+import { groupParentPath, isWithin, sanitizeGroupPath, type GroupPath } from './folders';
 import { boxAtPoint, type Box } from './hittest';
 import { columnLayout, LAYOUT, type LayoutBlock } from './layout';
 import { ColorPickerModal, TextPromptModal } from './modals';
@@ -379,20 +379,33 @@ export class StoryWebView extends ItemView {
 
 	// ---- drag-to-regroup -----------------------------------------------------
 
-	/** The id of the group box (if any) containing `node`'s current position — the deepest match, so dropping inside a nested box targets that box, not its parent. */
-	private boxUnderGroup(node: NodeSingular): string | null {
+	/**
+	 * The id of the group box (if any) containing `node`'s current position —
+	 * the deepest match, so dropping inside a nested box targets that box,
+	 * not its parent. `excludeGroupPath`, and its own subtree, are never
+	 * valid matches — used when dragging a group itself, which can't be
+	 * dropped into its own subfolder.
+	 */
+	private boxUnderGroup(node: NodeSingular, excludeGroupPath?: GroupPath): string | null {
 		const cy = this.cy;
 		if (!cy) return null;
 		const pos = node.position();
-		const boxes: Box[] = cy.nodes('.group').map((g) => {
-			const bb = g.boundingBox();
-			return { id: g.id(), depth: Number(g.data('depth') ?? 0), x1: bb.x1, y1: bb.y1, x2: bb.x2, y2: bb.y2 };
-		});
+		const boxes: Box[] = cy
+			.nodes('.group')
+			.filter((g) => {
+				if (excludeGroupPath === undefined) return true;
+				const path = g.data('path') as GroupPath | undefined;
+				return path !== undefined && !isWithin(path, excludeGroupPath);
+			})
+			.map((g) => {
+				const bb = g.boundingBox();
+				return { id: g.id(), depth: Number(g.data('depth') ?? 0), x1: bb.x1, y1: bb.y1, x2: bb.x2, y2: bb.y2 };
+			});
 		return boxAtPoint(boxes, pos.x, pos.y);
 	}
 
-	private updateDropTarget(node: NodeSingular): void {
-		const target = this.boxUnderGroup(node);
+	private updateDropTarget(node: NodeSingular, excludeGroupPath?: GroupPath): void {
+		const target = this.boxUnderGroup(node, excludeGroupPath);
 		if (target === this.dropTargetGroupId) return;
 		this.clearDropTarget();
 		this.dropTargetGroupId = target;
@@ -438,18 +451,72 @@ export class StoryWebView extends ItemView {
 		}
 
 		const dropped = { ...node.position() };
-		const ok = await this.moveNote(path, targetGroup);
-		if (ok) {
-			this.store.queuePosition(path, dropped);
+		const newPath = await this.moveNote(path, targetGroup);
+		if (newPath !== null) {
+			// Update id-bearing data on the real new path — not the stale one
+			// from before the move. moveNote() hands back the renamed file's
+			// *current* path for exactly this: queuing the position write (or
+			// any later interaction with this card, e.g. a right-click, before
+			// the next refresh catches up) under a path that no longer exists
+			// would silently go nowhere.
+			node.data('path', newPath);
+			node.data('group', targetGroup);
+			this.store.queuePosition(newPath, dropped);
 			// Reparent immediately rather than waiting for the vault-rename event's
 			// debounced refresh, so there's no quarter-second where the card sits
 			// detached (or under its old group) instead of its new one.
-			node.data('group', targetGroup);
 			reattach(targetGroupId);
 		} else {
 			const start = this.dragStartPositions.get(node.id());
 			if (start) node.position(start);
 			reattach(currentGroup === '' ? null : groupId(currentGroup));
+		}
+		this.dragStartPositions.delete(node.id());
+	}
+
+	/**
+	 * A group was dropped: if its box is now sitting inside a different
+	 * group's box (or outside every box, having come from one) than its
+	 * folder's real parent, move the folder — and everything nested inside
+	 * it — to match. Shifts every nested note's stored position by how far
+	 * the drag moved it, so the whole cluster keeps its on-screen spot
+	 * instead of snapping back to wherever each note's last-saved position
+	 * happened to be.
+	 *
+	 * Unlike a note, a successfully moved group's own id and every nested
+	 * note's/sub-group's `group`/`path` data are left stale here rather than
+	 * patched in place — they all derive from paths that just changed,
+	 * cascading through the whole subtree, and rebuilding that correctly
+	 * from the real vault state (what the next refresh already does) is
+	 * safer than hand-patching an unbounded subtree's worth of elements.
+	 */
+	private async handleGroupDropped(node: NodeSingular): Promise<void> {
+		const cy = this.cy;
+		if (!cy) return;
+		const currentPath = node.data('path') as GroupPath;
+		const currentParent = groupParentPath(currentPath);
+		const targetGroupId = this.boxUnderGroup(node, currentPath);
+		const targetPath = targetGroupId ? ((cy.getElementById(targetGroupId).data('path') as GroupPath | undefined) ?? '') : '';
+
+		const reattach = (parent: string | null): void => {
+			if ((node.isChild() ? node.parent().first().id() : null) !== parent) node.move({ parent });
+		};
+
+		if (targetPath === currentParent) {
+			// No renesting: just a repositioning drag, like any other group drag.
+			reattach(currentParent === '' ? null : groupId(currentParent));
+			this.persist(node.descendants('.note'));
+			this.dragStartPositions.delete(node.id());
+			return;
+		}
+
+		const start = this.dragStartPositions.get(node.id());
+		const end = node.position();
+		const delta = start ? { x: end.x - start.x, y: end.y - start.y } : undefined;
+		const ok = await this.moveGroup(currentPath, targetPath, delta);
+		if (!ok) {
+			if (start) node.position(start);
+			reattach(currentParent === '' ? null : groupId(currentParent));
 		}
 		this.dragStartPositions.delete(node.id());
 	}
@@ -538,20 +605,23 @@ export class StoryWebView extends ItemView {
 			if (e.target === cy && this.connectMode) this.clearConnectSource();
 		});
 
-		// Live preview while dragging a note: highlight the group box it would land in.
+		// Live preview while dragging a note or a group: highlight the box it
+		// would land in. A group can never be dropped into itself or one of its
+		// own subfolders, so those are excluded from candidacy up front.
 		cy.on('drag', 'node.note', (e) => this.updateDropTarget(e.target as NodeSingular));
+		cy.on('drag', 'node.group', (e) => {
+			const node = e.target as NodeSingular;
+			this.updateDropTarget(node, node.data('path') as GroupPath);
+		});
 
-		// Persist on release only — never mid-drag. Dragging a group box just
-		// repositions it and its members; dropping a note can also regroup it —
-		// see handleNoteDropped.
+		// Persist on release only — never mid-drag. Dropping either a note or a
+		// group on a different box's area regroups/renests it — see
+		// handleNoteDropped and handleGroupDropped.
 		cy.on('dragfree', 'node', (e) => {
 			const node = e.target as NodeSingular;
 			this.clearDropTarget();
-			if (node.hasClass('group')) {
-				this.persist(node.descendants('.note'));
-				return;
-			}
-			void this.handleNoteDropped(node);
+			if (node.hasClass('group')) void this.handleGroupDropped(node);
+			else void this.handleNoteDropped(node);
 		});
 
 		// Hover a note: emphasise it and its connections, fade the rest.
@@ -578,13 +648,14 @@ export class StoryWebView extends ItemView {
 			cy.batch(() => cy.elements().removeClass('hover highlight faded'));
 			const node = e.target as NodeSingular;
 			this.dragStartPositions.set(node.id(), { ...node.position() });
-			// Detach a note from its group for the drag: a compound group's box
-			// auto-stretches to keep containing all its children, including one
-			// still being dragged — left attached, the note's own original box
-			// would stretch to chase it anywhere, so every drop point would look
-			// like it's still "inside" that box. See handleNoteDropped, which
-			// reattaches it to wherever it actually lands.
-			if (node.hasClass('note') && node.isChild()) node.move({ parent: null });
+			// Detach from its own parent for the drag — a note or a group alike:
+			// a compound group's box auto-stretches to keep containing all its
+			// children, including one still being dragged — left attached, the
+			// dragged element's own current parent box would stretch to chase it
+			// anywhere, making every drop point look like it's still "inside" it.
+			// See handleNoteDropped/handleGroupDropped, which reattach it to
+			// wherever it actually lands.
+			if (node.isChild()) node.move({ parent: null });
 		});
 
 		// Keep the CSS dot grid locked to the graph as it pans and zooms.
@@ -766,6 +837,20 @@ export class StoryWebView extends ItemView {
 		);
 		menu.addItem((i) =>
 			i
+				.setTitle('Move group…')
+				.setIcon('box-select')
+				.onClick(() => this.promptNestGroup(path)),
+		);
+		if (groupParentPath(path) !== '') {
+			menu.addItem((i) =>
+				i
+					.setTitle('Move to top level')
+					.setIcon('arrow-up-to-line')
+					.onClick(() => void this.moveGroup(path, '')),
+			);
+		}
+		menu.addItem((i) =>
+			i
 				.setTitle('Ungroup')
 				.setIcon('ungroup')
 				.onClick(async () => {
@@ -802,14 +887,26 @@ export class StoryWebView extends ItemView {
 		menu.addItem((i) => i.setTitle('Open source note').setIcon('file-text').onClick(() => void this.openNote(sourcePath)));
 	}
 
-	/** Moves a note's file into `group`'s folder ('' = the root), reporting any failure — file moves, unlike frontmatter writes, can fail (name collisions, concurrent deletes). Returns whether it succeeded. */
-	private async moveNote(path: string, group: GroupPath): Promise<boolean> {
+	/** Moves a note's file into `group`'s folder ('' = the root), reporting any failure — file moves, unlike frontmatter writes, can fail (name collisions, concurrent deletes). Returns the note's new path, or null if the move failed. */
+	private async moveNote(path: string, group: GroupPath): Promise<string | null> {
 		try {
-			await this.store.moveNoteToGroup(path, group);
-			return true;
+			const file = await this.store.moveNoteToGroup(path, group);
+			return file.path;
 		} catch (err) {
 			console.error('[story-web] move to group failed', err);
 			new Notice(`Could not move note: ${err instanceof Error ? err.message : String(err)}`);
+			return null;
+		}
+	}
+
+	/** Moves a whole group into `targetGroup`'s folder ('' = top-level), shifting nested notes' stored positions by `delta` so the cluster keeps its on-screen spot. Reports any failure. */
+	private async moveGroup(group: GroupPath, targetGroup: GroupPath, delta?: Position): Promise<boolean> {
+		try {
+			await this.store.moveGroupToGroup(group, targetGroup, delta);
+			return true;
+		} catch (err) {
+			console.error('[story-web] move group failed', err);
+			new Notice(`Could not move group: ${err instanceof Error ? err.message : String(err)}`);
 			return false;
 		}
 	}
@@ -823,6 +920,20 @@ export class StoryWebView extends ItemView {
 			cta: 'Move',
 			onSubmit: async (raw) => {
 				await this.moveNote(path, sanitizeGroupPath(raw));
+			},
+		}).open();
+	}
+
+	private promptNestGroup(path: GroupPath): void {
+		const currentParent = groupParentPath(path);
+		new TextPromptModal(this.app, {
+			title: 'Move group',
+			label: 'New parent group (use “/” to nest; blank for top-level)',
+			initial: currentParent,
+			suggestions: this.store.existingGroups().filter((g) => g !== currentParent && !isWithin(g, path)),
+			cta: 'Move',
+			onSubmit: async (raw) => {
+				await this.moveGroup(path, sanitizeGroupPath(raw));
 			},
 		}).open();
 	}
