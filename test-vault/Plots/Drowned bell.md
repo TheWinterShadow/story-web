@@ -1,7 +1,7 @@
 ---
 blurb: A bell that rings underwater summons the drowned
 type: dnd
-color: cyan
+color: pink
 x: 83
 y: 224
 ---

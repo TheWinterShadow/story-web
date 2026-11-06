@@ -53,6 +53,31 @@ const COLOR_FALLBACKS: Record<ColorName, string> = {
 	yellow: '#e0ac00',
 };
 
+/** Used when nothing in the resolved `--font-interface` stack survives sanitisation. */
+const SAFE_FONT_FALLBACK = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+
+/** One CSS font-family entry: a quoted string, or a bare identifier (allows a leading '-' for vendor keywords like `-apple-system`). Never matches a literal '?', which is never part of a real font name. */
+const FONT_ENTRY = /^(?:"[^"?]+"|'[^'?]+'|[a-zA-Z-][a-zA-Z0-9 _-]*)$/;
+
+/**
+ * Obsidian's `--font-interface` can resolve to a stack Cytoscape's stricter
+ * font-family parser rejects outright — observed in the wild as literal
+ * `'??'` placeholder entries (from an OS/theme font substitution that didn't
+ * resolve). Cytoscape doesn't crash on an invalid property, but for a
+ * *function-mapped* one — which card labels use, unlike group labels' plain
+ * `data(label)` — a value it rejects can leave that element's label unset
+ * entirely, which is worse than just losing the custom font. Filtering the
+ * stack down to entries that look like real font names avoids ever handing
+ * Cytoscape something it will reject.
+ */
+export function sanitizeFontStack(raw: string): string {
+	const valid = raw
+		.split(',')
+		.map((entry) => entry.trim())
+		.filter((entry) => FONT_ENTRY.test(entry));
+	return valid.length > 0 ? valid.join(', ') : SAFE_FONT_FALLBACK;
+}
+
 /**
  * Resolve theme variables to colours Cytoscape can parse. Themes may define
  * variables with `hsl(var(...))` or `color-mix()`; computing them on a probe
@@ -85,7 +110,7 @@ export function readTheme(el: HTMLElement): Theme {
 		borderHover: resolve('--background-modifier-border-hover', '#d4d4d4'),
 		accent: resolve('--interactive-accent', '#8a5cf5'),
 		colors,
-		font: getComputedStyle(el).getPropertyValue('--font-interface').trim() || 'sans-serif',
+		font: sanitizeFontStack(getComputedStyle(el).getPropertyValue('--font-interface').trim()),
 	};
 	probe.remove();
 	return theme;
